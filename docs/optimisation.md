@@ -121,7 +121,9 @@ by bindgen) in `~/.cache/kaplay-native`, and applies the same ICF link flags
 when `ld.lld` is available (including rustup's toolchain copy). The `Slim V8`
 workflow runs it on GitHub for Linux x64 and arm64, smoke-tests the host
 against QuickJS, and publishes `librusty_v8_slim_<version>_<target>.a` on a
-`slim-v8-<version>` release. `release.yml` downloads that asset for Linux and
+`slim-v8-<version>` release. Each job records the script hash as `config=<hash>`
+in the release notes and skips itself when that asset is already published for
+the same config, so only a V8 version bump or a script change rebuilds it. `release.yml` downloads that asset for Linux and
 links the `-v8` hosts against it with `RUSTY_V8_ARCHIVE` (the prebuilt bindings
 are compatible), falling back to the prebuilt archive when the release is
 missing. macOS and Windows keep the prebuilt archive, and with it `Intl`,

@@ -26,31 +26,54 @@ jobs:
             target: aarch64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v4
+      - name: Check the published archive
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n '/^name = "v8"$/{n;s/^version = "\(.*\)"$/\1/p;q}' Cargo.lock)
+          config=$(sha256sum scripts/build-slim-v8.sh | cut -d' ' -f1)
+          asset=librusty_v8_slim_${version}_${{ matrix.target }}.a
+          notes=$(gh release view "slim-v8-$version" --json body -q .body 2>/dev/null || true)
+          if printf '%s' "$notes" | grep -qF "config=$config" &&
+            gh release view "slim-v8-$version" --json assets -q '.assets[].name' 2>/dev/null | grep -qxF "$asset"; then
+            echo "$asset is already published for config $config" >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.check.outputs.skip != 'true'
       - uses: actions/setup-node@v4
+        if: steps.check.outputs.skip != 'true'
         with:
           node-version: 22
       - name: Install native dependencies
+        if: steps.check.outputs.skip != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
             libxi-dev libxcursor-dev libxrandr-dev libgl1-mesa-dev libxkbcommon-x11-0 \
             xvfb unzip zstd lld
       - name: Restore the toolchain cache
+        if: steps.check.outputs.skip != 'true'
         uses: actions/cache@v4
         with:
           path: ~/.cache/kaplay-native
           key: slim-v8-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-slim-v8.sh') }}
       - name: Restore the slim archive
+        if: steps.check.outputs.skip != 'true'
         id: cache
         uses: actions/cache@v4
         with:
           path: target/slim-v8
           key: slim-v8-${{ hashFiles('Cargo.lock') }}-${{ matrix.target }}
       - name: Build the slim archive and host
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.check.outputs.skip != 'true' && steps.cache.outputs.cache-hit != 'true'
         run: scripts/build-slim-v8.sh
       - name: Smoke the slim host against QuickJS
+        if: steps.check.outputs.skip != 'true'
         run: |
           set -euo pipefail
           if [ ! -x target/release/kaplay-native-host ]; then
@@ -71,16 +94,19 @@ jobs:
           cmp quickjs.rgba v8.rgba
           node scripts/check-frame.mjs v8.rgba 320 240
       - name: Publish the archive
+        if: steps.check.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           version=$(sed -n '/^name = "v8"$/{n;s/^version = "\(.*\)"$/\1/p;q}' Cargo.lock)
+          config=$(sha256sum scripts/build-slim-v8.sh | cut -d' ' -f1)
           tag=slim-v8-$version
           asset=librusty_v8_slim_${version}_${{ matrix.target }}.a
+          notes=$(printf 'V8 %s without i18n, WebAssembly and Temporal, built for the kaplay-native v8 hosts.\n\nconfig=%s' "$version" "$config")
           cp target/slim-v8/librusty_v8.a "$asset"
           gh release view "$tag" >/dev/null 2>&1 ||
-            gh release create "$tag" --title "Slim V8 $version" \
-              --notes "V8 $version without i18n, WebAssembly and Temporal, built for the kaplay-native v8 hosts." ||
+            gh release create "$tag" --title "Slim V8 $version" --notes "$notes" ||
             echo "the $tag release already exists"
           gh release upload "$tag" "$asset" --clobber
+          gh release edit "$tag" --notes "$notes"
