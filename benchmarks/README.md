@@ -15,8 +15,11 @@ Linux x64 is the current baseline platform.
 | `crates/net/benches/net.rs` | loopback HTTP roundtrips, WebSocket echo |
 | `crates/gfx/examples/bench.rs` | hidden-window GL: uploads, buffers, draws, state, present, readback |
 | `examples/bench/main.js` | kitchen sink: GL sprites, canvas2d text/images, audio, video, HTTP, WebSocket |
+| `benchmarks/kaplay/main.js` | KAPLAY game scenarios: sprites, movement, text, collision, churn, events, draw-call micros |
 | `scripts/bench.mjs` | orchestrator, loopback HTTP/WS server, baseline diff |
+| `scripts/bench-kaplay.mjs` | orchestrator for the KAPLAY scenarios, baseline diff |
 | `benchmarks/baselines/linux-x64-<engine>.json` | committed baselines |
+| `benchmarks/baselines/kaplay-linux-x64-<engine>.json` | committed KAPLAY baselines |
 | `benchmarks/results/` | run output (ignored) |
 
 The integrated scenario prints deterministic `BENCH key=value` lines. The
@@ -43,6 +46,52 @@ even on an idle machine.
 The host side of a run is the `--bench-json <path>` flag: it writes frame-time
 percentiles plus per-phase (js, drain, network, audio, present) averages and
 p50/p99.
+
+## KAPLAY benchmarks
+
+The KAPLAY scenarios measure the JS engine half: the game runs on the real
+KAPLAY build through the native host, so the numbers cover KAPLAY's own game
+loop, ECS, draw pipeline, text, physics and event dispatch. They gate changes
+to a KAPLAY checkout against a committed baseline.
+
+```sh
+node scripts/bench-kaplay.mjs run      --engine quickjs --no-build
+node scripts/bench-kaplay.mjs baseline --engine both --no-build
+node scripts/bench-kaplay.mjs compare  --engine quickjs --no-build
+node scripts/bench-kaplay.mjs run      --engine quickjs --scenario draw
+```
+
+The bundle defaults to `../kaplay/dist/kaplay.js`; pass `--kaplay <path>` to
+point at another build. Build it with `npm run build` in the KAPLAY checkout
+first, since the baseline records the bundle hash and git commit. Each
+scenario runs twice by default and the lower JS p50 wins; use
+`--repeats <n>` to trade runtime for stability.
+
+| Scenario | Count | What it measures |
+| --- | --- | --- |
+| `idle` | 0 | the loop, frame start/end and the empty draw pipeline |
+| `draw` | 400 | static sprites: transform collect, sort and draw |
+| `move` | 400 | sprites moved from a per-object `onUpdate` |
+| `text` | 400 | static text objects: formatted text draw |
+| `collide` | 200 | overlapping `area()` bodies: broad and narrow phase |
+| `churn` | 400 | `add`/`destroy` of a fresh batch every other frame |
+| `events` | 400 | three `onUpdate` listeners per object |
+| `microquad` | 400 | `drawUVQuad` calls from one draw handler |
+| `microsprite` | 400 | `drawSprite` calls from one draw handler |
+| `micromatrix` | 400 | `pushTransform`/`pushTranslate`/`popTransform` |
+
+`BENCH` lines are deterministic (`objects`, `checksum`, `fired`) and are
+compared for exact equality between the baseline and the current run, and
+between engines. `BENCH_INFO` timings are reported but never gated. The gate
+diffs the JS phase p50 and the micro `loop_ms` timings per scenario: a warn is
+5% and a failure 10%, with a 20 µs floor. `idle` and `micromatrix`, `fps`,
+the frame percentiles including p99 and the `drain`, `network`, `audio` and
+`present` phases are recorded and reported but never gate, because they are
+diagnostic, bounce on this machine, or measure the host rather than KAPLAY.
+
+Absolute numbers drift between sessions on this laptop. Record a baseline
+back-to-back with the change being measured instead of comparing against a
+stale one.
 
 ## Baseline snapshot
 
