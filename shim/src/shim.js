@@ -204,6 +204,18 @@
 
     // ------------------------------------------------------------------- style
 
+    function stylePropertyName(name) {
+        const key = String(name);
+        if (key.startsWith("--")) return key;
+        return key.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
+    }
+
+    function stylePropertyText(name) {
+        const key = String(name);
+        if (key.startsWith("--")) return key;
+        return key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+    }
+
     function makeStyle() {
         const style = {};
         let cursor = "";
@@ -218,20 +230,39 @@
             enumerable: true,
             configurable: true,
         });
+        style.setProperty = function (name, value) {
+            style[stylePropertyName(name)] = String(value);
+        };
+        style.getPropertyValue = function (name) {
+            const value = style[stylePropertyName(name)];
+            return value === undefined || value === null ? "" : String(value);
+        };
+        style.removeProperty = function (name) {
+            const key = stylePropertyName(name);
+            const value = style.getPropertyValue(key);
+            if (key === "cursor") style.cursor = "";
+            else delete style[key];
+            return value;
+        };
         Object.defineProperty(style, "cssText", {
             get() {
                 return Object.entries(style)
                     .filter(([key]) => key.startsWith("__") ? false : typeof style[key] !== "function")
-                    .map(([key, value]) => `${key}: ${value}`)
+                    .map(([key, value]) => `${stylePropertyText(key)}: ${value}`)
                     .join("; ");
             },
             set(value) {
+                for (const key of Object.keys(style)) {
+                    if (key === "cssText" || typeof style[key] === "function") continue;
+                    if (key === "cursor") style.cursor = "";
+                    else delete style[key];
+                }
                 for (const part of String(value).split(";")) {
                     const index = part.indexOf(":");
                     if (index < 0) continue;
                     const key = part.slice(0, index).trim();
                     const entry = part.slice(index + 1).trim();
-                    if (key) style[key] = entry;
+                    if (key) style[stylePropertyName(key)] = entry;
                 }
             },
         });
@@ -501,8 +532,16 @@
             this.__context2d = null;
             this.__gl = null;
             this.__parent = null;
-            this.style = makeStyle();
+            this.__style = makeStyle();
             this.tabIndex = 0;
+        }
+
+        get style() {
+            return this.__style;
+        }
+
+        set style(value) {
+            if (typeof value === "string") this.__style.cssText = value;
         }
 
         get width() {
@@ -2998,12 +3037,49 @@
         event.movementX = payload.movementX || 0;
         event.movementY = payload.movementY || 0;
         event.buttons = mouseButtons;
+        if (type === "mousedown" && isTextControl(document.activeElement)) document.activeElement.blur();
         canvasListeners.emit(event);
+    }
+
+    function isTextControl(element) {
+        return element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
+    }
+
+    function editTextValue(element, event) {
+        const key = event.key;
+        if (!key || event.ctrlKey || event.metaKey || event.altKey) return;
+        let value = String(element.value);
+        if (key === "Backspace") {
+            value = value.slice(0, -1);
+        } else if (key === "Enter") {
+            if (element.tagName !== "TEXTAREA") return;
+            value += "\n";
+        } else if (key.length === 1) {
+            const max = Number(element.maxLength);
+            if (max >= 0 && value.length >= max) return;
+            value += key;
+        } else {
+            return;
+        }
+        if (value === element.value) return;
+        element.value = value;
+        const inputEvent = makeEvent("input", {});
+        inputEvent.target = element;
+        element.__emit("input", inputEvent);
     }
 
     function dispatchKey(type, payload) {
         const event = makeEvent(type, payload);
         Object.assign(event, payload);
+        const active = isTextControl(document.activeElement) ? document.activeElement : null;
+        if (active) {
+            event.target = active;
+            active.__emit(type, event);
+            if (type === "keydown" && !event.defaultPrevented) editTextValue(active, event);
+            documentListeners.emit(event);
+            windowListeners.emit(event);
+            return;
+        }
         canvasListeners.emit(event);
     }
 
@@ -3131,9 +3207,17 @@
             this.isConnected = true;
             this.children = [];
             this.parentElement = null;
-            this.style = makeStyle();
+            this.__style = makeStyle();
             this.__listeners = new Map();
             this.__attributes = new Map();
+        }
+
+        get style() {
+            return this.__style;
+        }
+
+        set style(value) {
+            if (typeof value === "string") this.__style.cssText = value;
         }
 
         setAttribute(name, value) {
@@ -3228,11 +3312,15 @@
             if (index >= 0) this.children.splice(index, 1);
             if (child instanceof HTMLCanvasElement) child.__parent = null;
             else if (child) child.parentElement = null;
+            if (child instanceof HTMLElement && (document.activeElement === child || child.contains(document.activeElement))) {
+                document.activeElement = null;
+            }
             return child;
         }
 
         remove() {
             if (this.parentElement) this.parentElement.removeChild(this);
+            else if (document.activeElement === this) document.activeElement = null;
         }
 
         contains(node) {

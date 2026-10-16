@@ -46,8 +46,11 @@ missing.
   `removeChild`, `insertBefore`, `setAttribute` for `div`, `input`, `textarea`,
   and `form` elements
 - `Event`, `MouseEvent`, `KeyboardEvent`, `WheelEvent`, and `CustomEvent`
-- canvas creation, `appendChild`, `getBoundingClientRect`, style subset
-  (`width`, `height`, `cssText`, `cursor`)
+- canvas creation, `appendChild`, `getBoundingClientRect`
+- `style` as a flat CSS property bag: direct properties, `cssText`,
+  `setProperty`/`getPropertyValue`/`removeProperty`, and assigning a CSS string
+  to `style` parses it like `cssText`. There is no cascade, layout, or DOM
+  rendering; only `cursor` and canvas `width`/`height` affect the native side.
 - `document.activeElement`, `focus()`, `blur()`
 - `addEventListener`/`removeEventListener` on canvas, document, and window
 - `dispatchEvent`
@@ -62,6 +65,14 @@ Pointer events carry `clientX/clientY`, `offsetX/offsetY` scaled through the
 drawn canvas rectangle, `movementX/movementY`, and a `buttons` bitmask.
 Keyboard events carry `key`, `code`, `repeat`, modifier flags, and
 `getModifierState`.
+
+While an `input` or `textarea` is focused, keys go to it like they do in a
+browser: printable keys and Backspace edit `value` and fire `input` (Enter adds
+a line break to a `textarea`), `maxLength` is enforced, and the canvas does not
+receive those keys. Removing the focused element, or clicking the canvas,
+releases focus so the game gets its keys back. DOM elements are not rendered,
+so games draw their own fields and keep the DOM field as an invisible input
+over them.
 
 Setting `cursor` on a `style` (`style.cursor`, or `cursor: ...` inside
 `cssText`) changes the real OS cursor. `none` hides it, which is what
