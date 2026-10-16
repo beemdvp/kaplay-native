@@ -37,6 +37,7 @@ Options:
   --warmup <n>       frames dropped before measuring (default 60)
   --count <n>        override the per-scenario object count
   --repeats <n>      runs per scenario, lowest p99 wins (default 1)
+  --vsync            measure with vsync on; reports missed refresh ticks
   --host <path>      host binary for the quickjs engine
   --v8-host <path>   host binary for the v8 engine
   --no-build         reuse target/release/kaplay-native-host-<engine>
@@ -54,6 +55,7 @@ function parse(argv) {
         warmup: 60,
         count: null,
         repeats: 1,
+        vsync: false,
         build: true,
         json: join(repo, "benchmarks", "results", "frame-stress.json"),
     };
@@ -95,6 +97,9 @@ function parse(argv) {
                 break;
             case "--no-build":
                 options.build = false;
+                break;
+            case "--vsync":
+                options.vsync = true;
                 break;
             case "--json":
                 options.json = next;
@@ -163,21 +168,32 @@ function percentiles(values) {
     const sorted = values.slice().sort((a, b) => a - b);
     const at = (q) => sorted[Math.min(sorted.length - 1, Math.round((sorted.length - 1) * q))];
     const average = values.reduce((a, b) => a + b, 0) / values.length;
+    const median = at(0.5);
+    const sd = Math.sqrt(
+        values.reduce((sum, value) => sum + (value - average) ** 2, 0) / values.length
+    );
+    const deviations = values.map((value) => Math.abs(value - median)).sort((a, b) => a - b);
+    const mad = deviations[Math.min(deviations.length - 1, Math.round((deviations.length - 1) * 0.5))];
     return {
         n: values.length,
         avg: average,
-        p50: at(0.5),
+        p50: median,
         p90: at(0.9),
         p99: at(0.99),
         p999: at(0.999),
         max: sorted[sorted.length - 1],
+        sd,
+        mad,
+        cv: average > 0 ? (sd / average) * 100 : 0,
+        over_1_5x: values.filter((value) => value > median * 1.5).length,
+        over_2x: values.filter((value) => value > median * 2).length,
         over_16_7: values.filter((value) => value > 16.7).length,
         over_33: values.filter((value) => value > 33.3).length,
         over_50: values.filter((value) => value > 50).length,
     };
 }
 
-function analyzeTrace(trace, warmup, frames) {
+function analyzeTrace(trace, warmup, frames, vsync) {
     const end = Math.min(trace.frame_ms.length, warmup + frames - 1);
     const cut = (values) => values.slice(warmup, end);
     const frameValues = cut(trace.frame_ms);
@@ -185,6 +201,15 @@ function analyzeTrace(trace, warmup, frames) {
     for (const [name, samples] of Object.entries(trace.phases_ms)) {
         phases[name] = percentiles(cut(samples));
     }
+    const frame_ms = percentiles(frameValues);
+    const target = vsync && frame_ms && frame_ms.p50 > 0 ? frame_ms.p50 : null;
+    const missed =
+        target === null
+            ? null
+            : frameValues.reduce(
+                  (sum, value) => sum + Math.max(0, Math.round(value / target) - 1),
+                  0
+              );
     const worst = trace.frame_ms
         .map((ms, index) => ({ frame: index + 1, ms }))
         .slice(warmup, end)
@@ -202,7 +227,7 @@ function analyzeTrace(trace, warmup, frames) {
             }
             return { frame: entry.frame, ms: entry.ms, phase, phase_ms: value };
         });
-    return { frame_ms: percentiles(frameValues), phases, worst };
+    return { frame_ms, phases, worst, target, missed };
 }
 
 function stressLine(output) {
@@ -223,7 +248,7 @@ function runScenario(binary, name, config, options) {
     const benchPath = join(tmpdir(), `stress-frames-${process.pid}-${name}-bench.json`);
     const tracePath = join(tmpdir(), `stress-frames-${process.pid}-${name}-trace.json`);
     const url = `http://127.0.0.1:1/index.html?scenario=${name}&count=${count}&frames=${frames}&warmup=${warmup}`;
-    const result = run(binary, [
+    const args = [
         "--script",
         "benchmarks/frame-stress/main.js",
         "--dir",
@@ -232,7 +257,9 @@ function runScenario(binary, name, config, options) {
         "640x360",
         "--frames",
         String(frames + warmup + 30),
-        "--no-vsync",
+    ];
+    if (!options.vsync) args.push("--no-vsync");
+    args.push(
         "--no-audio",
         "--headless",
         "--x11",
@@ -241,8 +268,9 @@ function runScenario(binary, name, config, options) {
         "--bench-json",
         benchPath,
         "--frame-trace",
-        tracePath,
-    ]);
+        tracePath
+    );
+    const result = run(binary, args);
     const output = `${result.stdout}\n${result.stderr}`;
     if (options.verbose) console.log(output.trim());
     const parsed = { status: result.status, stress: stressLine(output), bench: null, trace: null };
@@ -271,6 +299,7 @@ function gather(options, binaries) {
         platform,
         frames: options.frames,
         warmup: options.warmup,
+        vsync: options.vsync,
         engines: {},
     };
     for (const [engine, binary] of Object.entries(binaries)) {
@@ -282,7 +311,14 @@ function gather(options, binaries) {
                     `stress ${name} (${engine}, ${options.count ?? scenarios[name].count} objects, ${repeat + 1}/${options.repeats})`
                 );
                 const runResult = runScenario(binary, name, scenarios[name], options);
-                if (runResult.trace) runResult.analysis = analyzeTrace(runResult.trace, options.warmup, options.frames);
+                if (runResult.trace) {
+                    runResult.analysis = analyzeTrace(
+                        runResult.trace,
+                        options.warmup,
+                        options.frames,
+                        options.vsync
+                    );
+                }
                 delete runResult.trace;
                 runs.push(runResult);
             }
@@ -313,12 +349,14 @@ function printReport(results) {
             "scenario".padEnd(12),
             "engine".padEnd(8),
             "p50".padStart(7),
-            "p90".padStart(7),
             "p99".padStart(7),
             "p99.9".padStart(7),
             "max".padStart(8),
+            "sd".padStart(7),
+            "cv%".padStart(6),
+            "1.5x".padStart(5),
+            "missed".padStart(6),
             ">16.7".padStart(6),
-            ">33".padStart(5),
             "worst frame (ms, phase)",
         ].join(" ")
     );
@@ -330,6 +368,7 @@ function printReport(results) {
                 console.log(`${name.padEnd(12)} ${engine.padEnd(8)} no data (status ${scenario?.status})`);
                 continue;
             }
+            const missed = scenario.analysis.missed;
             const worst = scenario.analysis.worst
                 .slice(0, 3)
                 .map((hit) => `${hit.frame}:${hit.ms.toFixed(1)}(${hit.phase})`)
@@ -339,12 +378,14 @@ function printReport(results) {
                     name.padEnd(12),
                     engine.padEnd(8),
                     fixed(frame.p50),
-                    fixed(frame.p90),
                     fixed(frame.p99),
                     fixed(frame.p999),
                     fixed(frame.max, 8, 1),
+                    fixed(frame.sd),
+                    `${frame.cv.toFixed(1)}%`.padStart(6),
+                    String(frame.over_1_5x).padStart(5),
+                    (missed === null ? "-" : String(missed)).padStart(6),
                     String(frame.over_16_7).padStart(6),
-                    String(frame.over_33).padStart(5),
                     worst,
                 ].join(" ")
             );
@@ -359,8 +400,10 @@ function printComparison(results) {
     console.log("v8 vs quickjs (frame time, lower is better)");
     const flags = [];
     for (const name of scenarioNames(results)) {
-        const quickjs = results.engines.quickjs?.scenarios[name]?.analysis?.frame_ms;
-        const v8 = results.engines.v8?.scenarios[name]?.analysis?.frame_ms;
+        const quickjsAnalysis = results.engines.quickjs?.scenarios[name]?.analysis;
+        const v8Analysis = results.engines.v8?.scenarios[name]?.analysis;
+        const quickjs = quickjsAnalysis?.frame_ms;
+        const v8 = v8Analysis?.frame_ms;
         if (!quickjs || !v8) continue;
         const maxRatio = quickjs.max > 0 ? v8.max / quickjs.max : 1;
         const hitches = v8.over_16_7 - quickjs.over_16_7;
@@ -368,10 +411,20 @@ function printComparison(results) {
         if (maxRatio > 1.25 && v8.max - quickjs.max > 2) {
             note.push(`max x${maxRatio.toFixed(2)}`);
         }
+        if (v8.cv > quickjs.cv * 1.5 && v8.cv - quickjs.cv > 5) {
+            note.push(`cv ${v8.cv.toFixed(1)}% vs ${quickjs.cv.toFixed(1)}%`);
+        }
         if (hitches > 0) note.push(`+${hitches} over 16.7ms`);
+        if (quickjsAnalysis.missed !== null && v8Analysis.missed > quickjsAnalysis.missed) {
+            note.push(`missed ${v8Analysis.missed} vs ${quickjsAnalysis.missed}`);
+        }
         if (note.length > 0) flags.push(`${name}: ${note.join(", ")}`);
+        const missed =
+            v8Analysis.missed === null
+                ? ""
+                : `  missed ${v8Analysis.missed} vs ${quickjsAnalysis.missed}`;
         console.log(
-            `${name.padEnd(12)} max ${fixed(v8.max, 8, 1)} vs ${fixed(quickjs.max, 8, 1)}  p99 ${fixed(v8.p99)} vs ${fixed(quickjs.p99)}  hitches ${v8.over_16_7} vs ${quickjs.over_16_7}`
+            `${name.padEnd(12)} max ${fixed(v8.max, 8, 1)} vs ${fixed(quickjs.max, 8, 1)}  p99 ${fixed(v8.p99)} vs ${fixed(quickjs.p99)}  cv ${fixed(v8.cv, 6, 1)}% vs ${fixed(quickjs.cv, 6, 1)}%  hitches ${v8.over_16_7} vs ${quickjs.over_16_7}${missed}`
         );
     }
     console.log("");

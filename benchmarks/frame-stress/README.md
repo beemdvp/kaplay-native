@@ -34,13 +34,21 @@ logic. They isolate the host frame loop, the shim and the JS engine.
 node scripts/stress-frames.mjs run
 node scripts/stress-frames.mjs run --engine v8 --scenario retain --frames 5000
 node scripts/stress-frames.mjs run --no-build --count 4000 --json /tmp/stress.json
+node scripts/stress-frames.mjs run --vsync --frames 600 --scenario retain --count 20000
 ```
 
 The orchestrator builds (or reuses) `target/release/kaplay-native-host-<engine>`
 with the same convention as `scripts/bench.mjs`, runs every scenario on both
-engines, drops the first `--warmup` frames, and prints p50/p90/p99/p99.9/max
-plus over-budget counts and the worst frames with their dominant phase. It
-always passes `--headless`; run a host by hand if you want a visible window.
+engines, drops the first `--warmup` frames, and prints p50/p99/p99.9/max, the
+dispersion (`sd`, coefficient of variation `cv%`), frames over 1.5x the median,
+missed refresh ticks, over-budget counts, and the worst frames with their
+dominant phase. It always passes `--headless`; run a host by hand if you want a
+visible window.
+
+By default it passes `--no-vsync` to measure raw frame cost. `--vsync` leaves
+vsync on and reports `missed`, the number of display refresh ticks the run was
+late by (computed against the measured median interval). A hidden window still
+syncs to the display, so this works headless.
 
 The host gains two flags for this:
 
@@ -58,6 +66,9 @@ including the over-budget counts added here.
 - The first frames are JIT and shader/context warm-up. Every summary excludes
   `--warmup` frames; the orchestrator also slices off the JS summary frame, so
   the `console.log` that ends a scenario does not count as a hitch.
+- Consistency shows up in `sd`/`cv%` and in `1.5x` (frames over 1.5x the
+  median). Under `--vsync`, `missed` is the number of refresh deadlines the
+  run overran; a smooth 60 Hz game should have none.
 - Absolute numbers drift between sessions on a laptop (CPU state, thermals).
   Compare engines within one run and record a fresh baseline for a change.
 - A worst frame whose dominant phase is `present` is GL/driver pacing; one

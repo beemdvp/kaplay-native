@@ -15,14 +15,16 @@ packed Frax game. The stress server is `node scripts/stress-frames.mjs run`.
 The existing `--bench-json` summary only reported avg/p50/p99, which hides the
 frames players actually notice. Two host additions make spikes visible:
 
-- `--bench-json` now reports `min`, `p90`, `p95`, `p999`, `max` and counts of
-  frames over 16.7, 33.3, 50 and 100 ms.
+- `--bench-json` now reports `min`, `p90`, `p95`, `p999`, `max`, `sd`, `mad`
+  and counts of frames over 16.7, 33.3, 50 and 100 ms.
 - `--frame-trace <path>` writes every frame's total time and its `js`, `drain`,
   `network`, `audio` and `present` phases, so the worst frames can be attributed
   to a phase instead of guessed at.
 
 The orchestrator drops the first 100 frames (JIT and context warm-up) and the
 JS summary frame (a `console.log` at 3000 frames is a hitch if you count it).
+Consistency is measured with `sd` and the coefficient of variation, and with
+`--vsync` against display refresh deadlines (`missed` ticks).
 
 ## No V8 regression in steady state
 
@@ -50,6 +52,27 @@ V8 against 18.75 ms on QuickJS, `text` 8.51 ms against 157.77 ms, `collide`
 14.26 ms against 487 ms (see the KAPLAY performance findings). Packed Frax
 averages 0.26 ms p99 2.24 ms on V8 against 0.43 ms p99 7.69 ms on QuickJS,
 excluding warm-up.
+
+## Consistency at the display cadence
+
+The same suites run with `--vsync` measure whether frames land on display
+refresh deadlines. With the light scenarios (600 frames each) both engines are
+smooth: `sd` 0.38-0.46 ms, `cv` 2.2-2.6 %, and zero missed ticks. The
+quickjs-only exceptions are `burst`, which reaches 30-39 ms on 3 of 600
+frames, and `json` (max 24.7 ms); V8 stays under 18.6 ms on both.
+
+Under sustained allocation the spread diverges. `retain` at 20000
+objects/frame, 600 frames at a 17.4 ms refresh:
+
+| Engine | p50 | p99 | max | sd | cv | over 1.5x | missed ticks |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| QuickJS | 17.21 | 19.93 | 559.8 | 40.23 | 193 % | 5 | 125 |
+| V8 | 17.25 | 46.86 | 64.6 | 4.73 | 26 % | 16 | 25 |
+
+QuickJS is more uniform while it keeps up, but when it falls over it stalls for
+hundreds of milliseconds (559.8 ms worst frame); V8 has more medium-sized
+late frames (16 over 1.5x) but a fifth of the missed deadlines and a tenth of
+the worst frame. For held frames, V8 is the more consistent engine.
 
 ## Where the remaining frame-time tails come from
 
@@ -109,6 +132,7 @@ does not schedule DOM timers per frame.
 ```sh
 node scripts/stress-frames.mjs run --engine both --frames 3000
 node scripts/stress-frames.mjs run --engine v8 --scenario retain --frames 5000 --verbose
+node scripts/stress-frames.mjs run --engine both --vsync --frames 600 --scenario mix
 ```
 
 GC attribution on V8:

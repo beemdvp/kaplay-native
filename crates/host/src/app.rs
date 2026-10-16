@@ -53,21 +53,33 @@ fn sample_stats(samples: &std::collections::VecDeque<f32>) -> serde_json::Value 
             "p99": 0.0,
             "p999": 0.0,
             "max": 0.0,
+            "sd": 0.0,
+            "mad": 0.0,
             "samples": 0
         });
     }
     let mut sorted: Vec<f32> = samples.iter().copied().collect();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let average = samples.iter().sum::<f32>() / samples.len() as f32;
+    let variance = samples
+        .iter()
+        .map(|value| (value - average) * (value - average))
+        .sum::<f32>()
+        / samples.len() as f32;
+    let median = percentile(&sorted, 0.5);
+    let mut deviations: Vec<f32> = samples.iter().map(|value| (value - median).abs()).collect();
+    deviations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     json!({
         "avg": average,
         "min": percentile(&sorted, 0.0),
-        "p50": percentile(&sorted, 0.5),
+        "p50": median,
         "p90": percentile(&sorted, 0.9),
         "p95": percentile(&sorted, 0.95),
         "p99": percentile(&sorted, 0.99),
         "p999": percentile(&sorted, 0.999),
         "max": percentile(&sorted, 1.0),
+        "sd": variance.sqrt(),
+        "mad": percentile(&deviations, 0.5),
         "samples": samples.len(),
     })
 }
@@ -1060,6 +1072,9 @@ mod tests {
         assert_eq!(stats["over_100"], 1);
         assert_eq!(stats["min"], 2.0);
         assert_eq!(stats["max"], 120.0);
+        assert_eq!(stats["mad"], 18.0);
+        let sd = stats["sd"].as_f64().unwrap();
+        assert!((sd - 42.734).abs() < 0.01, "sd was {sd}");
     }
 
     #[test]
