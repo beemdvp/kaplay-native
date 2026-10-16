@@ -165,6 +165,7 @@ pub fn install(
     install_canvas(scope, native, data);
     install_gl(scope, native, data);
     install_net(scope, native, data);
+    install_auth(scope, native, data);
     install_audio(scope, native, data);
     install_video(scope, native, data);
     install_steam(scope, native, data);
@@ -714,6 +715,30 @@ fn install_net(scope: &PinScope<'_, '_>, native: Local<v8::Object>, data: Local<
     register(scope, object, "readResponse", net_read_response, data);
     register(scope, object, "readMessage", net_read_message, data);
     set_property(scope, native, "net", object.into());
+}
+
+fn install_auth(scope: &PinScope<'_, '_>, native: Local<v8::Object>, data: Local<Value>) {
+    let object = v8::Object::new(scope);
+    register(scope, object, "open", auth_open, data);
+    set_property(scope, native, "auth", object.into());
+}
+
+fn auth_open<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
+    let state = host(&args);
+    let provider_url = string_arg(scope, &args, 0);
+    let server = match crate::auth::AuthServer::start(&provider_url) {
+        Ok(server) => server,
+        Err(error) => {
+            log::warn!("auth relay: {error}");
+            return rv.set_bool(false);
+        }
+    };
+    if let Err(error) = crate::auth::open_browser(server.relay_url()) {
+        log::warn!("auth browser: {error}");
+        return rv.set_bool(false);
+    }
+    *state.auth.borrow_mut() = Some(server);
+    rv.set_bool(true);
 }
 
 fn net_fetch<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {

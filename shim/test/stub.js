@@ -146,6 +146,12 @@ export function installStub() {
             },
         },
         gl: {},
+        auth: {
+            open: (url) => {
+                record("auth.open", [url]);
+                return true;
+            },
+        },
         net: {
             fetch: (id, method, url, headers, body) => {
                 record("net.fetch", [id, method, url, JSON.parse(headers), body ? Array.from(body) : null]);

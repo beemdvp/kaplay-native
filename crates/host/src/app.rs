@@ -236,6 +236,27 @@ impl Inner {
         }
     }
 
+    fn pump_auth(&self) {
+        let event = {
+            let auth = self.state.auth.borrow();
+            auth.as_ref().and_then(crate::auth::AuthServer::drain)
+        };
+        let Some(event) = event else {
+            return;
+        };
+        *self.state.auth.borrow_mut() = None;
+        let payload = match event {
+            crate::auth::AuthEvent::Callback(payload) => payload,
+            crate::auth::AuthEvent::Cancelled => String::new(),
+        };
+        if let Err(error) = self
+            .js
+            .call_global("__kapNative_onAuthCallback", &[JsArg::Str(&payload)])
+        {
+            log::error!("auth callback: {error}");
+        }
+    }
+
     fn dispatch_network(&self, event: NetworkEvent) {
         match event {
             NetworkEvent::Response(response) => {
@@ -365,6 +386,7 @@ impl Inner {
         }
         let network_start = std::time::Instant::now();
         self.pump_network();
+        self.pump_auth();
         let network_ms = network_start.elapsed().as_secs_f32() * 1000.0;
         let audio_start = std::time::Instant::now();
         self.pump_audio();
@@ -666,6 +688,7 @@ impl HostApp {
             audio: Some(audio),
             pending_response: std::cell::RefCell::new(None),
             pending_message: std::cell::RefCell::new(None),
+            auth: std::cell::RefCell::new(None),
             game_name: self.config.game_name.clone(),
             steam: self.steam.clone(),
         });

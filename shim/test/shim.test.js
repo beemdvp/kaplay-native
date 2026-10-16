@@ -1190,3 +1190,33 @@ test("screen is exposed globally with the window size", () => {
     assert.equal(screen.height, 600);
     assert.equal(screen.dpr, 2);
 });
+
+test("window.open hands the url to the system browser and resolves the auth callback", () => {
+    const messages = [];
+    const listener = (event) => messages.push(event);
+    window.addEventListener("message", listener);
+
+    const popup = window.open(
+        "https://game.example/auth/provider/discord?token=abc",
+        "Login with Discord",
+        "popup,width=480,height=768",
+    );
+    assert.equal(typeof popup.close, "function");
+    assert.equal(popup.closed, false);
+
+    const opened = stub.calls.filter((call) => call.name === "auth.open").at(-1);
+    assert.deepEqual(opened.args, ["https://game.example/auth/provider/discord?token=abc"]);
+
+    assert.equal(window.open("https://game.example/auth/provider/discord"), null);
+    assert.equal(window.open("file:///etc/passwd"), null);
+
+    globalThis.__kapNative_onAuthCallback('{"user":{"id":"1"},"token":"jwt"}');
+    assert.equal(popup.closed, true);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].type, "message");
+    assert.deepEqual(messages[0].data, { user: { id: "1" }, token: "jwt" });
+
+    globalThis.__kapNative_onAuthCallback("");
+    assert.equal(messages.length, 1);
+    window.removeEventListener("message", listener);
+});

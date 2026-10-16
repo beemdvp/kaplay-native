@@ -40,6 +40,7 @@ pub fn install<'js>(ctx: &Ctx<'js>, state: Rc<HostState>, shim: &str) -> rquickj
     install_canvas(ctx, &native, &state)?;
     install_gl(ctx, &native, &state)?;
     install_net(ctx, &native, &state)?;
+    install_auth(ctx, &native, &state)?;
     install_audio(ctx, &native, &state)?;
     install_video(ctx, &native, &state)?;
     install_steam(ctx, &native, &state)?;
@@ -785,6 +786,35 @@ fn install_net<'js>(
         )?;
     }
     native.set("net", object)?;
+    Ok(())
+}
+
+fn install_auth<'js>(
+    ctx: &Ctx<'js>,
+    native: &Object<'js>,
+    state: &Rc<HostState>,
+) -> rquickjs::Result<()> {
+    let object = Object::new(ctx.clone())?;
+    let state = state.clone();
+    object.set(
+        "open",
+        Function::new(ctx.clone(), move |provider_url: String| -> bool {
+            let server = match crate::auth::AuthServer::start(&provider_url) {
+                Ok(server) => server,
+                Err(error) => {
+                    log::warn!("auth relay: {error}");
+                    return false;
+                }
+            };
+            if let Err(error) = crate::auth::open_browser(server.relay_url()) {
+                log::warn!("auth browser: {error}");
+                return false;
+            }
+            *state.auth.borrow_mut() = Some(server);
+            true
+        })?,
+    )?;
+    native.set("auth", object)?;
     Ok(())
 }
 

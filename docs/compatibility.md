@@ -87,6 +87,17 @@ exactly as they do in a browser.
 
 Wheel events carry `deltaX`, `deltaY`, and `deltaMode`.
 
+`window.open(url, ...)` opens the URL in the system default browser. There is
+no renderer for web pages inside the game process, so it returns a window-like
+stub whose `closed` flag flips to `true` once the flow finishes; code that
+waits for a `message` event from the opened page still works through a
+loopback relay. That is what makes popup-based OAuth flows (for example
+Colyseus/Supabase `signInWithProvider`) work: the runtime serves a small
+sign-in page on `127.0.0.1`, the system browser opens the provider login, and
+the provider's callback page posts the `{ user, token }` payload back to the
+game. `window.open` returns `null` when a flow is already in flight, when the
+browser cannot be started, or for non-`http(s)` URLs.
+
 ## Canvas 2D
 
 `clearRect`, `fillRect` and `strokeRect` (no-ops used by KAPLAY's background
