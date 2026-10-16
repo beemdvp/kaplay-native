@@ -363,7 +363,15 @@ pub fn version() -> String {
 
 fn initialize() {
     INIT.call_once(|| {
-        v8::V8::set_flags_from_string("--expose-gc");
+        let mut flags = String::from("--expose-gc");
+        if let Ok(extra) = std::env::var("KAPLAY_NATIVE_V8_FLAGS") {
+            let extra = extra.trim();
+            if !extra.is_empty() {
+                flags.push(' ');
+                flags.push_str(extra);
+            }
+        }
+        v8::V8::set_flags_from_string(&flags);
         let platform = v8::new_default_platform(0, false).make_shared();
         v8::V8::initialize_platform(platform);
         v8::V8::initialize();

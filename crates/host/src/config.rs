@@ -21,6 +21,7 @@ pub struct HostConfig {
     pub screenshot: Option<PathBuf>,
     pub screenshot_raw: Option<PathBuf>,
     pub bench_json: Option<PathBuf>,
+    pub frame_trace: Option<PathBuf>,
     pub save_dir: PathBuf,
     pub game_name: String,
     pub url: Option<String>,

@@ -16,6 +16,8 @@ Linux x64 is the current baseline platform.
 | `crates/gfx/examples/bench.rs` | hidden-window GL: uploads, buffers, draws, state, present, readback |
 | `examples/bench/main.js` | kitchen sink: GL sprites, canvas2d text/images, audio, video, HTTP, WebSocket |
 | `scripts/bench.mjs` | orchestrator, loopback HTTP/WS server, baseline diff |
+| `benchmarks/frame-stress/main.js` | raw-runtime scenarios: allocation, timers, rAF, microtasks, JSON, canvas, codegen |
+| `scripts/stress-frames.mjs` | frame-time stress orchestrator, outlier and hitch report |
 | `benchmarks/baselines/linux-x64-<engine>.json` | committed baselines |
 | `benchmarks/results/` | run output (ignored) |
 
@@ -42,7 +44,30 @@ even on an idle machine.
 
 The host side of a run is the `--bench-json <path>` flag: it writes frame-time
 percentiles plus per-phase (js, drain, network, audio, present) averages and
-p50/p99.
+p50/p99, along with `min`, `p90`, `p95`, `p999`, `max`, `sd`, `mad` and counts
+of frames over 16.7/33.3/50/100 ms. `--frame-trace <path>` writes every frame's
+total and phase times for spike attribution; see
+`benchmarks/frame-stress/README.md` and `docs/frame-timing.md` for the stress
+bed built on it.
+
+## Frame stress
+
+`benchmarks/frame-stress` stress-tests fps and frame times on the raw runtime
+(no KAPLAY) and reports per-frame outliers instead of averages. It is the
+suite used to investigate frame timing per engine; `docs/frame-timing.md` has
+the findings.
+
+```sh
+node scripts/stress-frames.mjs run
+node scripts/stress-frames.mjs run --engine v8 --scenario retain --frames 5000
+```
+
+The scenarios cover allocation churn, retained heap, allocation bursts, string
+and JSON work, DOM timers, animation frames, microtasks, canvas text, codegen
+and a mix, on both engines by default. Reports include dispersion (`sd`,
+coefficient of variation) and, with `--vsync`, missed display refresh ticks.
+Absolute numbers drift between sessions; compare within a run or against a
+freshly recorded baseline.
 
 ## Baseline snapshot
 

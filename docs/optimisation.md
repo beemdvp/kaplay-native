@@ -215,6 +215,14 @@ lock.
 - **Shim frame loop.** `__kapNative_onFrame` copied the animation-frame queue
   with `splice` (a fresh array every frame) and walked every timer. It now
   swaps buffers and skips the timer map when it is empty.
+- **Shim timers.** `setTimeout`/`setInterval` crossed the bridge for
+  `native.env.now()` on every call, `tickTimers` allocated a due array and
+  sorted it even when already ordered, and every timer copied an empty
+  `arguments` slice. The shim now reuses the frame timestamp while a frame is
+  running, reuses the due list, skips the sort when it is not needed and
+  shares one empty args array. 1500 timers/frame: schedule+clear p50 2.46 ms
+  → 0.36 ms on V8 and 4.27 ms → 1.99 ms on QuickJS; nested timers p50
+  12.34 ms → 2.11 ms and 34.04 ms → 14.19 ms. See `docs/frame-timing.md`.
 
 Remaining hot path candidates (numbers below are pre-optimisation Linux x64
 quickjs baseline figures; current baselines live in `benchmarks/README.md`):
@@ -260,6 +268,19 @@ network, audio, present) breakdown from an integrated run:
 
 ```sh
 target/release/kaplay-native-host --pak game.pak --no-vsync --bench-json bench.json --frames 600
+```
+
+`--frame-trace <path>` writes every frame's total and phase times for spike
+attribution, and `docs/frame-timing.md` documents the stress bed built on it:
+
+```sh
+node scripts/stress-frames.mjs run --engine both --frames 3000
+```
+
+Extra V8 flags can be passed for diagnosis before the isolate initialises:
+
+```sh
+KAPLAY_NATIVE_V8_FLAGS="--trace-gc" target/release/kaplay-native-host-v8 --pak game.pak --no-vsync
 ```
 
 Bundle size:

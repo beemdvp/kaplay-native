@@ -46,6 +46,14 @@ test("timers and animation frames run in order", () => {
     assert.deepEqual(order, ["frame1", "frame2", "interval", "timeout"]);
 });
 
+test("timers fire in due order even when scheduled out of order", () => {
+    const order = [];
+    setTimeout(() => order.push("late"), 20);
+    setTimeout(() => order.push("early"), 5);
+    advance(25);
+    assert.deepEqual(order, ["early", "late"]);
+});
+
 test("cancelAnimationFrame removes a queued callback", () => {
     let called = false;
     const id = requestAnimationFrame(() => {
