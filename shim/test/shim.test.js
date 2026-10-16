@@ -1011,3 +1011,182 @@ test("scheduled oscillators and biquads produce filtered PCM and free it on end"
     assert.ok(pass > 0.01);
     assert.ok(rejected < pass / 10, `${pass} vs ${rejected}`);
 });
+
+test("styles expose the CSS property API", () => {
+    const element = document.createElement("div");
+    element.style.setProperty("opacity", "0.5");
+    element.style.setProperty("z-index", "-999");
+    assert.equal(element.style.opacity, "0.5");
+    assert.equal(element.style.zIndex, "-999");
+    assert.equal(element.style.getPropertyValue("z-index"), "-999");
+    assert.equal(element.style.getPropertyValue("color"), "");
+    assert.equal(element.style.cssText.includes("opacity: 0.5"), true);
+    assert.equal(element.style.cssText.includes("z-index: -999"), true);
+
+    assert.equal(element.style.removeProperty("z-index"), "-999");
+    assert.equal(element.style.getPropertyValue("z-index"), "");
+    assert.equal(element.style.cssText.includes("z-index"), false);
+
+    element.style.setProperty("--accent", "#fff");
+    assert.equal(element.style.getPropertyValue("--accent"), "#fff");
+    assert.equal(element.style.cssText.includes("--accent: #fff"), true);
+});
+
+test("assigning a css string to element.style parses it like cssText", () => {
+    const element = document.createElement("input");
+    element.style.width = "320px";
+    element.style = "opacity: 0; z-index: -999";
+
+    assert.equal(typeof element.style.setProperty, "function");
+    assert.equal(element.style.opacity, "0");
+    assert.equal(element.style.getPropertyValue("z-index"), "-999");
+    assert.equal(element.style.width, undefined);
+
+    element.style.setProperty("opacity", "1");
+    assert.equal(element.style.opacity, "1");
+    assert.equal(element.style.cssText.includes("opacity: 1"), true);
+});
+
+test("focused text controls receive typing instead of the canvas", () => {
+    const canvas = makeCanvas();
+    const canvasKeys = [];
+    canvas.addEventListener("keyup", (event) => canvasKeys.push(event.key));
+
+    const input = document.createElement("input");
+    input.maxLength = 2;
+    document.body.appendChild(input);
+    input.focus();
+
+    const seen = [];
+    const values = [];
+    input.addEventListener("keydown", (event) => seen.push(`down:${event.key}`));
+    input.addEventListener("keyup", (event) => seen.push(`up:${event.key}`));
+    input.addEventListener("input", () => values.push(input.value));
+
+    globalThis.__kapNative_dispatch("keydown", JSON.stringify({ key: "a", code: "KeyA", repeat: false }));
+    globalThis.__kapNative_dispatch("keyup", JSON.stringify({ key: "a", code: "KeyA", repeat: false }));
+    globalThis.__kapNative_dispatch("keydown", JSON.stringify({ key: "b", code: "KeyB", repeat: false }));
+    globalThis.__kapNative_dispatch("keydown", JSON.stringify({ key: "c", code: "KeyC", repeat: false }));
+    globalThis.__kapNative_dispatch("keydown", JSON.stringify({ key: "Backspace", code: "Backspace", repeat: false }));
+
+    assert.equal(input.value, "a");
+    assert.deepEqual(values, ["a", "ab", "a"]);
+    assert.deepEqual(seen, ["down:a", "up:a", "down:b", "down:c", "down:Backspace"]);
+    assert.deepEqual(canvasKeys, []);
+
+    input.blur();
+    globalThis.__kapNative_dispatch("keyup", JSON.stringify({ key: "q", code: "KeyQ", repeat: false }));
+    assert.deepEqual(canvasKeys, ["q"]);
+    input.remove();
+});
+
+test("Enter adds a line break to a focused textarea only", () => {
+    const inputValues = [];
+    const input = document.createElement("input");
+    input.addEventListener("input", () => inputValues.push(input.value));
+    document.body.appendChild(input);
+    input.focus();
+    globalThis.__kapNative_dispatch("keydown", JSON.stringify({ key: "x", code: "KeyX", repeat: false }));
+    globalThis.__kapNative_dispatch("keydown", JSON.stringify({ key: "Enter", code: "Enter", repeat: false }));
+    assert.equal(input.value, "x");
+
+    const textareaValues = [];
+    const textarea = document.createElement("textarea");
+    textarea.addEventListener("input", () => textareaValues.push(textarea.value));
+    document.body.appendChild(textarea);
+    textarea.focus();
+    globalThis.__kapNative_dispatch("keydown", JSON.stringify({ key: "y", code: "KeyY", repeat: false }));
+    globalThis.__kapNative_dispatch("keydown", JSON.stringify({ key: "Enter", code: "Enter", repeat: false }));
+    assert.equal(textarea.value, "y\n");
+    assert.deepEqual(inputValues, ["x"]);
+    assert.deepEqual(textareaValues, ["y", "y\n"]);
+
+    input.remove();
+    textarea.remove();
+});
+
+test("removing or clicking away from a focused input releases the keys", () => {
+    const canvas = makeCanvas();
+    const canvasKeys = [];
+    canvas.addEventListener("keydown", (event) => canvasKeys.push(event.key));
+
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    assert.equal(document.activeElement, input);
+
+    globalThis.__kapNative_dispatch("mousedown", JSON.stringify({ clientX: 5, clientY: 5, button: 0 }));
+    globalThis.__kapNative_dispatch("mouseup", JSON.stringify({ clientX: 5, clientY: 5, button: 0 }));
+    assert.equal(document.activeElement, null);
+    globalThis.__kapNative_dispatch("keydown", JSON.stringify({ key: "w", code: "KeyW", repeat: false }));
+    assert.deepEqual(canvasKeys, ["w"]);
+
+    input.focus();
+    input.remove();
+    assert.equal(document.activeElement, null);
+
+    const wrapper = document.createElement("div");
+    const nested = document.createElement("input");
+    wrapper.appendChild(nested);
+    document.body.appendChild(wrapper);
+    nested.focus();
+    wrapper.remove();
+    assert.equal(document.activeElement, null);
+});
+
+test("clicking a positioned text control focuses it instead of the canvas", () => {
+    const canvas = makeCanvas();
+    const canvasPresses = [];
+    canvas.addEventListener("mousedown", () => canvasPresses.push("canvas"));
+
+    const input = document.createElement("input");
+    input.maxLength = 16;
+    document.body.appendChild(input);
+    input.style = "position:absolute;left:40px;top:40px;width:120px;height:30px;opacity:0";
+    input.addEventListener("click", () => input.focus());
+    input.click();
+    assert.equal(document.activeElement, input);
+
+    globalThis.__kapNative_dispatch("mousedown", JSON.stringify({ clientX: 60, clientY: 50, button: 0 }));
+    globalThis.__kapNative_dispatch("mouseup", JSON.stringify({ clientX: 60, clientY: 50, button: 0 }));
+    assert.equal(document.activeElement, input);
+    assert.deepEqual(canvasPresses, []);
+
+    globalThis.__kapNative_dispatch("keydown", JSON.stringify({ key: "a", code: "KeyA", repeat: false }));
+    assert.equal(input.value, "a");
+
+    globalThis.__kapNative_dispatch("mousedown", JSON.stringify({ clientX: 300, clientY: 200, button: 0 }));
+    globalThis.__kapNative_dispatch("mouseup", JSON.stringify({ clientX: 300, clientY: 200, button: 0 }));
+    assert.equal(document.activeElement, null);
+    assert.deepEqual(canvasPresses, ["canvas"]);
+    input.remove();
+});
+
+test("text controls behind the canvas keep clicks on the canvas", () => {
+    const canvas = makeCanvas();
+    const canvasPresses = [];
+    canvas.addEventListener("mousedown", () => canvasPresses.push("canvas"));
+
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.style = "position:absolute;left:10px;top:10px;width:80px;height:20px;z-index:-999";
+
+    globalThis.__kapNative_dispatch("mousedown", JSON.stringify({ clientX: 20, clientY: 15, button: 0 }));
+    globalThis.__kapNative_dispatch("mouseup", JSON.stringify({ clientX: 20, clientY: 15, button: 0 }));
+    assert.equal(canvasPresses.length, 1);
+    assert.notEqual(document.activeElement, input);
+    input.remove();
+});
+
+test("screen is exposed globally with the window size", () => {
+    assert.equal(typeof screen.width, "number");
+    assert.equal(typeof screen.height, "number");
+
+    globalThis.__kapNative_dispatch(
+        "resize",
+        JSON.stringify({ width: 800, height: 600, dpr: 2 }),
+    );
+    assert.equal(screen.width, 800);
+    assert.equal(screen.height, 600);
+    assert.equal(screen.dpr, 2);
+});

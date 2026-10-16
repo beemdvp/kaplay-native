@@ -1006,7 +1006,15 @@ impl ApplicationHandler for HostApp {
                         ("mouseup", value as i32)
                     }
                 };
-                inner.dispatch(name, json!({ "button": button }));
+                let (x, y) = inner.cursor_position.get();
+                inner.dispatch(
+                    name,
+                    json!({
+                        "button": button,
+                        "clientX": x,
+                        "clientY": y,
+                    }),
+                );
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let (x, y) = match delta {

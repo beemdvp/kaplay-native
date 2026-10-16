@@ -108,15 +108,18 @@ impl FontStore {
 
     pub fn measure(&self, font: &str, text: &str) -> TextMetrics {
         let (size, family, weight, style) = parse_font(font);
+        let fallback = ttf_parser::Face::parse(&self.default, 0).ok();
         let result = self.with_face(&family, weight, style, &mut |face| {
-            let units = face.units_per_em() as f32;
-            let scale = size / units;
+            let scale = size / face.units_per_em() as f32;
             let ascent = face.ascender() as f32 * scale;
             let descent = -(face.descender() as f32) * scale;
             let mut width = 0.0f32;
             for character in text.chars() {
-                if let Some(glyph) = face.glyph_index(character) {
-                    width += face.glyph_hor_advance(glyph).unwrap_or(0) as f32 * scale;
+                if let Some((glyph_face, glyph)) =
+                    resolve_glyph(&face, fallback.as_ref(), character)
+                {
+                    let glyph_scale = size / glyph_face.units_per_em() as f32;
+                    width += glyph_face.glyph_hor_advance(glyph).unwrap_or(0) as f32 * glyph_scale;
                 }
             }
             TextMetrics {
@@ -146,6 +149,7 @@ impl FontStore {
         stroke: Option<StrokeSpec>,
     ) {
         let (size, family, weight, style) = parse_font(font);
+        let fallback = ttf_parser::Face::parse(&self.default, 0).ok();
         let metrics = self.measure(font, text);
         let start_x = match align {
             TextAlign::Left => x,
@@ -173,13 +177,21 @@ impl FontStore {
 
             let mut pen_x = start_x;
             for character in text.chars() {
-                let Some(glyph) = face.glyph_index(character) else {
+                let Some((glyph_face, glyph)) = resolve_glyph(&face, fallback.as_ref(), character)
+                else {
                     continue;
                 };
-                let advance = face.glyph_hor_advance(glyph).unwrap_or(0) as f32 * scale;
-                if let Some(path) = glyph_path(&face, glyph) {
-                    let transform =
-                        tiny_skia::Transform::from_row(scale, 0.0, 0.0, -scale, pen_x, baseline_y);
+                let glyph_scale = size / glyph_face.units_per_em() as f32;
+                let advance = glyph_face.glyph_hor_advance(glyph).unwrap_or(0) as f32 * glyph_scale;
+                if let Some(path) = glyph_path(glyph_face, glyph) {
+                    let transform = tiny_skia::Transform::from_row(
+                        glyph_scale,
+                        0.0,
+                        0.0,
+                        -glyph_scale,
+                        pen_x,
+                        baseline_y,
+                    );
                     if let Some(stroke) = stroke {
                         let stroke = tiny_skia::Stroke {
                             width: stroke.width,
@@ -239,6 +251,20 @@ impl FontStore {
 
         ttf_parser::Face::parse(&self.default, 0).ok().map(callback)
     }
+}
+
+fn resolve_glyph<'f, 'd>(
+    face: &'f ttf_parser::Face<'d>,
+    fallback: Option<&'f ttf_parser::Face<'d>>,
+    character: char,
+) -> Option<(&'f ttf_parser::Face<'d>, ttf_parser::GlyphId)> {
+    if let Some(glyph) = face.glyph_index(character) {
+        return Some((face, glyph));
+    }
+    let fallback = fallback?;
+    fallback
+        .glyph_index(character)
+        .map(|glyph| (fallback, glyph))
 }
 
 fn generic_family(family: &str) -> fontdb::Family<'_> {
@@ -332,6 +358,7 @@ mod tests {
     use super::*;
 
     const DEFAULT_FONT: &[u8] = include_bytes!("../../../assets/fonts/DejaVuSansMono.ttf");
+    const ASCII_ONLY: &[u8] = include_bytes!("../tests/fixtures/ascii-only.ttf");
 
     #[test]
     fn parses_font_shorthand() {
@@ -354,6 +381,38 @@ mod tests {
             &mut pixmap,
             "16px monospace",
             "hi",
+            2.0,
+            2.0,
+            Baseline::Top,
+            TextAlign::Left,
+            Rgba::WHITE,
+            None,
+        );
+        let painted = pixmap
+            .data()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] > 0);
+        assert!(painted);
+    }
+
+    #[test]
+    fn draws_missing_glyphs_with_the_default_font() {
+        let narrow = ttf_parser::Face::parse(ASCII_ONLY, 0).unwrap();
+        assert!(narrow.glyph_index('a').is_some());
+        assert!(narrow.glyph_index('•').is_none());
+
+        let mut store = FontStore::new(DEFAULT_FONT.to_vec());
+        store.register("narrow", ASCII_ONLY.to_vec());
+
+        assert!(store.measure("16px narrow", "•").width > 0.0);
+
+        let mut pixmap = tiny_skia::Pixmap::new(32, 32).unwrap();
+        store.draw(
+            &mut pixmap,
+            "16px narrow",
+            "•",
             2.0,
             2.0,
             Baseline::Top,
