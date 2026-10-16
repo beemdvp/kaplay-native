@@ -103,6 +103,7 @@ fn handle(
     cancel: &str,
     sender: &Sender<AuthEvent>,
 ) -> bool {
+    let _ = stream.set_nonblocking(false);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
     let Some(request) = read_request(&mut stream) else {
