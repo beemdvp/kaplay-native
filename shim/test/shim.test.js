@@ -1177,3 +1177,16 @@ test("text controls behind the canvas keep clicks on the canvas", () => {
     assert.notEqual(document.activeElement, input);
     input.remove();
 });
+
+test("screen is exposed globally with the window size", () => {
+    assert.equal(typeof screen.width, "number");
+    assert.equal(typeof screen.height, "number");
+
+    globalThis.__kapNative_dispatch(
+        "resize",
+        JSON.stringify({ width: 800, height: 600, dpr: 2 }),
+    );
+    assert.equal(screen.width, 800);
+    assert.equal(screen.height, 600);
+    assert.equal(screen.dpr, 2);
+});

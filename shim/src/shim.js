@@ -4416,6 +4416,7 @@
     define("document", document);
     define("navigator", navigator);
     define("location", location);
+    define("screen", screen);
     define("console", console);
     define("localStorage", localStorage);
     define("Image", Image);

@@ -80,10 +80,10 @@ Setting `cursor` on a `style` (`style.cursor`, or `cursor: ...` inside
 `fakeMouse` games rely on, and the standard keywords map to platform cursor
 icons.
 
-Window resizes update `innerWidth`/`innerHeight`, the canvas box reported to
-`ResizeObserver`, and dispatch a `resize` event on `window`, so KAPLAY's
-`onResize` and any `ResizeObserver`-based layout run exactly as they do in a
-browser.
+Window resizes update `innerWidth`/`innerHeight`, `screen.width`/`height`/`dpr`,
+the canvas box reported to `ResizeObserver`, and dispatch a `resize` event on
+`window`, so KAPLAY's `onResize` and any `ResizeObserver`-based layout run
+exactly as they do in a browser.
 
 Wheel events carry `deltaX`, `deltaY`, and `deltaMode`.
 
