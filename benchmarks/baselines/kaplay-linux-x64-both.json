@@ -1,0 +1,1371 @@
+{
+  "created": "2026-10-16T12:23:08.639Z",
+  "platform": "linux-x64",
+  "kaplay": {
+    "path": "/home/beem/Projects/kaplay/dist/kaplay.js",
+    "bytes": 301037,
+    "sha256": "5971ba8abb549667",
+    "commit": "45dad2cada67bcadc91572de772e8f71e38c7bd4"
+  },
+  "engines": {
+    "quickjs": {
+      "scenarios": {
+        "idle": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.idle.objects": "0",
+            "kaplay.idle.checksum": "0"
+          },
+          "info": {
+            "kaplay.idle.setup_ms": "0.009",
+            "kaplay.idle.frames": "300"
+          },
+          "bench": {
+            "duration_s": 0.406435659,
+            "engine": "quickjs",
+            "fps": 787.3324914140961,
+            "frame_ms": {
+              "avg": 0.6108298301696777,
+              "p50": 0.486378014087677,
+              "p99": 3.1141719818115234,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.0035772088449448347,
+                "p50": 0.0028639999218285084,
+                "p99": 0.007193000055849552,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.007331401109695435,
+                "p50": 0.002862999914214015,
+                "p99": 0.020183999091386795,
+                "samples": 320
+              },
+              "js": {
+                "avg": 0.2062595635652542,
+                "p50": 0.1684579998254776,
+                "p99": 0.5235329866409302,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.0013573260512202978,
+                "p50": 0.0013970000436529517,
+                "p99": 0.002374999923631549,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.31974926590919495,
+                "p50": 0.19290201365947723,
+                "p99": 2.3876090049743652,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 0.2424900084733963
+            },
+            {
+              "status": 0,
+              "js_p50": 0.1684579998254776
+            }
+          ]
+        },
+        "draw": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.draw.objects": "400",
+            "kaplay.draw.checksum": "1033426616"
+          },
+          "info": {
+            "kaplay.draw.setup_ms": "152.527",
+            "kaplay.draw.frames": "300"
+          },
+          "bench": {
+            "duration_s": 6.927755717,
+            "engine": "quickjs",
+            "fps": 46.19100514972734,
+            "frame_ms": {
+              "avg": 20.982189178466797,
+              "p50": 20.19563865661621,
+              "p99": 26.37586212158203,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.004411343019455671,
+                "p50": 0.0037719998508691788,
+                "p99": 0.009638000279664993,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.007801336236298084,
+                "p50": 0.003421999979764223,
+                "p99": 0.007193000055849552,
+                "samples": 320
+              },
+              "js": {
+                "avg": 20.469812393188477,
+                "p50": 19.689985275268555,
+                "p99": 25.92838478088379,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.0014883038820698857,
+                "p50": 0.0013970000436529517,
+                "p99": 0.002374999923631549,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.347753643989563,
+                "p50": 0.3376849889755249,
+                "p99": 0.5599210262298584,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 20.544288635253906
+            },
+            {
+              "status": 0,
+              "js_p50": 19.689985275268555
+            }
+          ]
+        },
+        "move": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.move.objects": "400",
+            "kaplay.move.checksum": "1175459672"
+          },
+          "info": {
+            "kaplay.move.setup_ms": "132.319",
+            "kaplay.move.frames": "300"
+          },
+          "bench": {
+            "duration_s": 7.72684119,
+            "engine": "quickjs",
+            "fps": 41.414077516455336,
+            "frame_ms": {
+              "avg": 23.518577575683594,
+              "p50": 22.804716110229492,
+              "p99": 31.767641067504883,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.004203166346997023,
+                "p50": 0.003840999910607934,
+                "p99": 0.00851999968290329,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.007905198261141777,
+                "p50": 0.003421999979764223,
+                "p99": 0.007542999926954508,
+                "samples": 320
+              },
+              "js": {
+                "avg": 22.9791259765625,
+                "p50": 22.270076751708984,
+                "p99": 31.224552154541016,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.001413410296663642,
+                "p50": 0.0013970000436529517,
+                "p99": 0.002374999923631549,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.35702261328697205,
+                "p50": 0.3344019949436188,
+                "p99": 0.5999400019645691,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 22.270076751708984
+            },
+            {
+              "status": 0,
+              "js_p50": 23.32308006286621
+            }
+          ]
+        },
+        "text": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.text.objects": "400",
+            "kaplay.text.checksum": "1322180120"
+          },
+          "info": {
+            "kaplay.text.setup_ms": "724.808",
+            "kaplay.text.frames": "300"
+          },
+          "bench": {
+            "duration_s": 51.391944338,
+            "engine": "quickjs",
+            "fps": 6.22665680627668,
+            "frame_ms": {
+              "avg": 159.99179077148438,
+              "p50": 158.2945556640625,
+              "p99": 182.89462280273438,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.004674630239605904,
+                "p50": 0.0043299999088048935,
+                "p99": 0.008101999759674072,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.007326588034629822,
+                "p50": 0.0034229999873787165,
+                "p99": 0.0053079999051988125,
+                "samples": 320
+              },
+              "js": {
+                "avg": 159.49545288085938,
+                "p50": 157.76718139648438,
+                "p99": 182.49542236328125,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.0014226256171241403,
+                "p50": 0.0014659999869763851,
+                "p99": 0.001955999992787838,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.3284085690975189,
+                "p50": 0.3189670145511627,
+                "p99": 0.5530770421028137,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 160.11268615722656
+            },
+            {
+              "status": 0,
+              "js_p50": 157.76718139648438
+            }
+          ]
+        },
+        "collide": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.collide.objects": "200",
+            "kaplay.collide.checksum": "4263485452"
+          },
+          "info": {
+            "kaplay.collide.setup_ms": "120.929",
+            "kaplay.collide.frames": "5"
+          },
+          "bench": {
+            "duration_s": 7.465515162,
+            "engine": "quickjs",
+            "fps": 2.1431876639191803,
+            "frame_ms": {
+              "avg": 454.1771545410156,
+              "p50": 487.4837341308594,
+              "p99": 527.1661376953125,
+              "samples": 16
+            },
+            "frames": 16,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.01312593836337328,
+                "p50": 0.00635599996894598,
+                "p99": 0.1164269968867302,
+                "samples": 16
+              },
+              "drain": {
+                "avg": 0.10476695746183395,
+                "p50": 0.0037719998508691788,
+                "p99": 1.6176040172576904,
+                "samples": 16
+              },
+              "js": {
+                "avg": 453.48675537109375,
+                "p50": 487.03338623046875,
+                "p99": 526.687744140625,
+                "samples": 16
+              },
+              "network": {
+                "avg": 0.0014361251378431916,
+                "p50": 0.0014659999869763851,
+                "p99": 0.002374999923631549,
+                "samples": 16
+              },
+              "present": {
+                "avg": 0.4143182635307312,
+                "p50": 0.32127100229263306,
+                "p99": 1.8805570602416992,
+                "samples": 16
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 497.09527587890625
+            },
+            {
+              "status": 0,
+              "js_p50": 487.03338623046875
+            }
+          ]
+        },
+        "churn": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.churn.objects": "50",
+            "kaplay.churn.checksum": "3265717371"
+          },
+          "info": {
+            "kaplay.churn.setup_ms": "0.007",
+            "kaplay.churn.frames": "300"
+          },
+          "bench": {
+            "duration_s": 2.995574841,
+            "engine": "quickjs",
+            "fps": 106.82423807951858,
+            "frame_ms": {
+              "avg": 8.727581024169922,
+              "p50": 3.8528881072998047,
+              "p99": 18.683916091918945,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.003926833160221577,
+                "p50": 0.003421999979764223,
+                "p99": 0.0056570000015199184,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.007559904363006353,
+                "p50": 0.0033519999124109745,
+                "p99": 0.00621600029990077,
+                "samples": 320
+              },
+              "js": {
+                "avg": 8.263720512390137,
+                "p50": 3.4423580169677734,
+                "p99": 18.310333251953125,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.001402915921062231,
+                "p50": 0.0013970000436529517,
+                "p99": 0.001955999992787838,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.3143611550331116,
+                "p50": 0.3026929795742035,
+                "p99": 0.5301679968833923,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 3.4423580169677734
+            },
+            {
+              "status": 0,
+              "js_p50": 3.7764809131622314
+            }
+          ]
+        },
+        "events": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.events.objects": "400",
+            "kaplay.events.checksum": "0",
+            "kaplay.events.fired": "358800"
+          },
+          "info": {
+            "kaplay.events.setup_ms": "63.566",
+            "kaplay.events.frames": "300"
+          },
+          "bench": {
+            "duration_s": 1.7552825250000001,
+            "engine": "quickjs",
+            "fps": 182.30683405225605,
+            "frame_ms": {
+              "avg": 4.867819786071777,
+              "p50": 4.567788124084473,
+              "p99": 7.221354007720947,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.0036083825398236513,
+                "p50": 0.003352999920025468,
+                "p99": 0.005238000303506851,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.007667754776775837,
+                "p50": 0.0033519999124109745,
+                "p99": 0.007612999994307756,
+                "samples": 320
+              },
+              "js": {
+                "avg": 4.430975437164307,
+                "p50": 4.117518424987793,
+                "p99": 6.736163139343262,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.001454666256904602,
+                "p50": 0.0013970000436529517,
+                "p99": 0.002374999923631549,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.28918808698654175,
+                "p50": 0.2725920081138611,
+                "p99": 0.453762024641037,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 4.117518424987793
+            },
+            {
+              "status": 0,
+              "js_p50": 4.4076409339904785
+            }
+          ]
+        },
+        "microquad": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.microquad.objects": "0",
+            "kaplay.microquad.checksum": "0"
+          },
+          "info": {
+            "kaplay.microquad.setup_ms": "0.473",
+            "kaplay.microquad.frames": "300",
+            "kaplay.microquad.loop_ms": "6.755"
+          },
+          "bench": {
+            "duration_s": 3.038545232,
+            "engine": "quickjs",
+            "fps": 105.31355486499469,
+            "frame_ms": {
+              "avg": 8.837398529052734,
+              "p50": 8.511749267578125,
+              "p99": 12.2706298828125,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.003982551861554384,
+                "p50": 0.003702000016346574,
+                "p99": 0.005727000068873167,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.00721570011228323,
+                "p50": 0.003352999920025468,
+                "p99": 0.007612999994307756,
+                "samples": 320
+              },
+              "js": {
+                "avg": 8.345423698425293,
+                "p50": 8.003509521484375,
+                "p99": 11.748214721679688,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.0014433168107643723,
+                "p50": 0.0013970000436529517,
+                "p99": 0.001955999992787838,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.32483652234077454,
+                "p50": 0.3145669996738434,
+                "p99": 0.6042010188102722,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 8.003509521484375
+            },
+            {
+              "status": 0,
+              "js_p50": 8.0497465133667
+            }
+          ]
+        },
+        "microsprite": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.microsprite.objects": "0",
+            "kaplay.microsprite.checksum": "0"
+          },
+          "info": {
+            "kaplay.microsprite.setup_ms": "0.468",
+            "kaplay.microsprite.frames": "300",
+            "kaplay.microsprite.loop_ms": "10.375"
+          },
+          "bench": {
+            "duration_s": 4.184454509,
+            "engine": "quickjs",
+            "fps": 76.47352822494264,
+            "frame_ms": {
+              "avg": 12.440539360046387,
+              "p50": 11.917230606079102,
+              "p99": 16.435291290283203,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.004065645858645439,
+                "p50": 0.0037709998432546854,
+                "p99": 0.007612000219523907,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.00746395206078887,
+                "p50": 0.003352999920025468,
+                "p99": 0.0053079999051988125,
+                "samples": 320
+              },
+              "js": {
+                "avg": 11.92247200012207,
+                "p50": 11.39858627319336,
+                "p99": 15.898069381713867,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.0015771575272083282,
+                "p50": 0.0013970000436529517,
+                "p99": 0.002443999983370304,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.3432047963142395,
+                "p50": 0.32944297790527344,
+                "p99": 0.5525180101394653,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 11.39858627319336
+            },
+            {
+              "status": 0,
+              "js_p50": 11.806880950927734
+            }
+          ]
+        },
+        "micromatrix": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.micromatrix.objects": "0",
+            "kaplay.micromatrix.checksum": "0"
+          },
+          "info": {
+            "kaplay.micromatrix.setup_ms": "0.413",
+            "kaplay.micromatrix.frames": "300",
+            "kaplay.micromatrix.loop_ms": "0.461"
+          },
+          "bench": {
+            "duration_s": 0.573118627,
+            "engine": "quickjs",
+            "fps": 558.3486296284696,
+            "frame_ms": {
+              "avg": 1.139770269393921,
+              "p50": 1.0336569547653198,
+              "p99": 2.53853702545166,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.0037576823960989714,
+                "p50": 0.0033519999124109745,
+                "p99": 0.007542999926954508,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.007033975329250097,
+                "p50": 0.0028639999218285084,
+                "p99": 0.0053079999051988125,
+                "samples": 320
+              },
+              "js": {
+                "avg": 0.704363226890564,
+                "p50": 0.6470829844474792,
+                "p99": 1.1600010395050049,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.0014298188034445047,
+                "p50": 0.0013970000436529517,
+                "p99": 0.0023739999160170555,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.32910317182540894,
+                "p50": 0.264070987701416,
+                "p99": 1.7913700342178345,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 0.6470829844474792
+            },
+            {
+              "status": 0,
+              "js_p50": 0.6668480038642883
+            }
+          ]
+        }
+      },
+      "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)"
+    },
+    "v8": {
+      "scenarios": {
+        "idle": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.idle.objects": "0",
+            "kaplay.idle.checksum": "0"
+          },
+          "info": {
+            "kaplay.idle.setup_ms": "0.003",
+            "kaplay.idle.frames": "300"
+          },
+          "bench": {
+            "duration_s": 0.373984267,
+            "engine": "v8",
+            "fps": 855.6509677985999,
+            "frame_ms": {
+              "avg": 0.6609575748443604,
+              "p50": 0.49985700845718384,
+              "p99": 2.974349021911621,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.004229542333632708,
+                "p50": 0.003421999979764223,
+                "p99": 0.006774000357836485,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.008823432959616184,
+                "p50": 0.0033519999124109745,
+                "p99": 0.006703999824821949,
+                "samples": 320
+              },
+              "js": {
+                "avg": 0.19265195727348328,
+                "p50": 0.15693499147891998,
+                "p99": 0.7655349969863892,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.0013780759181827307,
+                "p50": 0.0013970000436529517,
+                "p99": 0.002374999923631549,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.3738676905632019,
+                "p50": 0.24269999563694,
+                "p99": 2.683806896209717,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 0.1812400072813034
+            },
+            {
+              "status": 0,
+              "js_p50": 0.15693499147891998
+            }
+          ]
+        },
+        "draw": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.draw.objects": "400",
+            "kaplay.draw.checksum": "1033426616"
+          },
+          "info": {
+            "kaplay.draw.setup_ms": "53.641",
+            "kaplay.draw.frames": "300"
+          },
+          "bench": {
+            "duration_s": 1.3865958919999999,
+            "engine": "v8",
+            "fps": 230.7810096988229,
+            "frame_ms": {
+              "avg": 3.8213348388671875,
+              "p50": 3.3486311435699463,
+              "p99": 7.25578498840332,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.004419252742081881,
+                "p50": 0.003352999920025468,
+                "p99": 0.00621600029990077,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.011141247116029263,
+                "p50": 0.004261000081896782,
+                "p99": 0.030032001435756683,
+                "samples": 320
+              },
+              "js": {
+                "avg": 3.37646746635437,
+                "p50": 2.9108619689941406,
+                "p99": 6.168629169464111,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.0013442498166114092,
+                "p50": 0.0013970000436529517,
+                "p99": 0.001955999992787838,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.2926470637321472,
+                "p50": 0.2734299898147583,
+                "p99": 0.5121490359306335,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 2.9108619689941406
+            },
+            {
+              "status": 0,
+              "js_p50": 3.091403007507324
+            }
+          ]
+        },
+        "move": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.move.objects": "400",
+            "kaplay.move.checksum": "1175459672"
+          },
+          "info": {
+            "kaplay.move.setup_ms": "42.071",
+            "kaplay.move.frames": "300"
+          },
+          "bench": {
+            "duration_s": 1.69817715,
+            "engine": "v8",
+            "fps": 188.43734883607402,
+            "frame_ms": {
+              "avg": 4.780879020690918,
+              "p50": 4.501996040344238,
+              "p99": 6.726664066314697,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.004120885860174894,
+                "p50": 0.0033519999124109745,
+                "p99": 0.005797000136226416,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.010508125647902489,
+                "p50": 0.0043299999088048935,
+                "p99": 0.009149999357759953,
+                "samples": 320
+              },
+              "js": {
+                "avg": 4.331986904144287,
+                "p50": 4.038318157196045,
+                "p99": 6.170166015625,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.0013746197801083326,
+                "p50": 0.0013970000436529517,
+                "p99": 0.001955999992787838,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.29506126046180725,
+                "p50": 0.2864910066127777,
+                "p99": 0.40613001585006714,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 4.038318157196045
+            },
+            {
+              "status": 0,
+              "js_p50": 4.515895366668701
+            }
+          ]
+        },
+        "text": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.text.objects": "400",
+            "kaplay.text.checksum": "1322180120"
+          },
+          "info": {
+            "kaplay.text.setup_ms": "159.120",
+            "kaplay.text.frames": "300"
+          },
+          "bench": {
+            "duration_s": 3.30046254,
+            "engine": "v8",
+            "fps": 96.95610724913728,
+            "frame_ms": {
+              "avg": 9.785459518432617,
+              "p50": 9.018798828125,
+              "p99": 13.554040908813477,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.004162774421274662,
+                "p50": 0.0034229999873787165,
+                "p99": 0.005727000068873167,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.011987262405455112,
+                "p50": 0.004748999606817961,
+                "p99": 0.008940000087022781,
+                "samples": 320
+              },
+              "js": {
+                "avg": 9.285454750061035,
+                "p50": 8.507628440856934,
+                "p99": 13.154407501220703,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.0013981263618916273,
+                "p50": 0.0013970000436529517,
+                "p99": 0.001955999992787838,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.333275705575943,
+                "p50": 0.3181989789009094,
+                "p99": 0.5280029773712158,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 8.507628440856934
+            },
+            {
+              "status": 0,
+              "js_p50": 8.789579391479492
+            }
+          ]
+        },
+        "collide": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.collide.objects": "200",
+            "kaplay.collide.checksum": "4263485452"
+          },
+          "info": {
+            "kaplay.collide.setup_ms": "31.310",
+            "kaplay.collide.frames": "5"
+          },
+          "bench": {
+            "duration_s": 0.475026015,
+            "engine": "v8",
+            "fps": 33.68236579632381,
+            "frame_ms": {
+              "avg": 20.559600830078125,
+              "p50": 14.74344539642334,
+              "p99": 76.08975219726562,
+              "samples": 16
+            },
+            "frames": 16,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.01508600078523159,
+                "p50": 0.003352999920025468,
+                "p99": 0.1892009973526001,
+                "samples": 16
+              },
+              "drain": {
+                "avg": 0.10361436754465103,
+                "p50": 0.004748999606817961,
+                "p99": 1.5159839391708374,
+                "samples": 16
+              },
+              "js": {
+                "avg": 19.894548416137695,
+                "p50": 14.255181312561035,
+                "p99": 75.33943939208984,
+                "samples": 16
+              },
+              "network": {
+                "avg": 0.0013008750975131989,
+                "p50": 0.0013970000436529517,
+                "p99": 0.001884999917820096,
+                "samples": 16
+              },
+              "present": {
+                "avg": 0.3827325403690338,
+                "p50": 0.33104899525642395,
+                "p99": 1.2597349882125854,
+                "samples": 16
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 14.255181312561035
+            },
+            {
+              "status": 0,
+              "js_p50": 15.449474334716797
+            }
+          ]
+        },
+        "churn": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.churn.objects": "50",
+            "kaplay.churn.checksum": "3265717371"
+          },
+          "info": {
+            "kaplay.churn.setup_ms": "0.002",
+            "kaplay.churn.frames": "300"
+          },
+          "bench": {
+            "duration_s": 0.775572912,
+            "engine": "v8",
+            "fps": 412.5982161687462,
+            "frame_ms": {
+              "avg": 1.9139187335968018,
+              "p50": 1.6802520751953125,
+              "p99": 9.254376411437988,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.004062368534505367,
+                "p50": 0.003283000085502863,
+                "p99": 0.005797000136226416,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.010460108518600464,
+                "p50": 0.0037709998432546854,
+                "p99": 0.015644000843167305,
+                "samples": 320
+              },
+              "js": {
+                "avg": 1.4382067918777466,
+                "p50": 1.2797789573669434,
+                "p99": 8.721412658691406,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.0013182623079046607,
+                "p50": 0.0013970000436529517,
+                "p99": 0.0023739999160170555,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.34682363271713257,
+                "p50": 0.2628139853477478,
+                "p99": 1.9365010261535645,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 1.3160970211029053
+            },
+            {
+              "status": 0,
+              "js_p50": 1.2797789573669434
+            }
+          ]
+        },
+        "events": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.events.objects": "400",
+            "kaplay.events.checksum": "0",
+            "kaplay.events.fired": "358800"
+          },
+          "info": {
+            "kaplay.events.setup_ms": "20.570",
+            "kaplay.events.frames": "300"
+          },
+          "bench": {
+            "duration_s": 0.583301339,
+            "engine": "v8",
+            "fps": 548.6015179539987,
+            "frame_ms": {
+              "avg": 1.3175873756408691,
+              "p50": 1.1352078914642334,
+              "p99": 3.0772249698638916,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.00407633651047945,
+                "p50": 0.0033519999124109745,
+                "p99": 0.005727000068873167,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.008839757181704044,
+                "p50": 0.0034229999873787165,
+                "p99": 0.006703999824821949,
+                "samples": 320
+              },
+              "js": {
+                "avg": 0.9177239537239075,
+                "p50": 0.7769190073013306,
+                "p99": 2.239335060119629,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.0013907188549637794,
+                "p50": 0.0013970000436529517,
+                "p99": 0.002374999923631549,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.2874176800251007,
+                "p50": 0.23334099352359772,
+                "p99": 1.897878885269165,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 0.7769190073013306
+            },
+            {
+              "status": 0,
+              "js_p50": 0.8570280075073242
+            }
+          ]
+        },
+        "microquad": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.microquad.objects": "0",
+            "kaplay.microquad.checksum": "0"
+          },
+          "info": {
+            "kaplay.microquad.setup_ms": "0.333",
+            "kaplay.microquad.frames": "300",
+            "kaplay.microquad.loop_ms": "0.286"
+          },
+          "bench": {
+            "duration_s": 0.465962028,
+            "engine": "v8",
+            "fps": 686.7512388799202,
+            "frame_ms": {
+              "avg": 0.9370266199111938,
+              "p50": 0.830627977848053,
+              "p99": 2.561514139175415,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.004169527441263199,
+                "p50": 0.0033519999124109745,
+                "p99": 0.005727000068873167,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.009390456601977348,
+                "p50": 0.0037709998432546854,
+                "p99": 0.01040599960833788,
+                "samples": 320
+              },
+              "js": {
+                "avg": 0.5401273965835571,
+                "p50": 0.44873297214508057,
+                "p99": 1.3841919898986816,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.0013047624379396439,
+                "p50": 0.0013970000436529517,
+                "p99": 0.0023739999160170555,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.28016138076782227,
+                "p50": 0.24947500228881836,
+                "p99": 1.3160970211029053,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 0.4513869881629944
+            },
+            {
+              "status": 0,
+              "js_p50": 0.44873297214508057
+            }
+          ]
+        },
+        "microsprite": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.microsprite.objects": "0",
+            "kaplay.microsprite.checksum": "0"
+          },
+          "info": {
+            "kaplay.microsprite.setup_ms": "0.277",
+            "kaplay.microsprite.frames": "300",
+            "kaplay.microsprite.loop_ms": "0.566"
+          },
+          "bench": {
+            "duration_s": 0.576503086,
+            "engine": "v8",
+            "fps": 555.0707494391453,
+            "frame_ms": {
+              "avg": 1.2792303562164307,
+              "p50": 1.1556010246276855,
+              "p99": 2.8751041889190674,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.004158849827945232,
+                "p50": 0.0033519999124109745,
+                "p99": 0.008031999692320824,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.010111312381923199,
+                "p50": 0.0038419999182224274,
+                "p99": 0.009008999913930893,
+                "samples": 320
+              },
+              "js": {
+                "avg": 0.8469101190567017,
+                "p50": 0.7512180209159851,
+                "p99": 1.7007850408554077,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.0013518751366063952,
+                "p50": 0.0013970000436529517,
+                "p99": 0.001955999992787838,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.314567893743515,
+                "p50": 0.2631639838218689,
+                "p99": 1.7481379508972168,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 0.7512180209159851
+            },
+            {
+              "status": 0,
+              "js_p50": 0.7695159912109375
+            }
+          ]
+        },
+        "micromatrix": {
+          "status": 0,
+          "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)",
+          "checks": {
+            "kaplay.micromatrix.objects": "0",
+            "kaplay.micromatrix.checksum": "0"
+          },
+          "info": {
+            "kaplay.micromatrix.setup_ms": "0.386",
+            "kaplay.micromatrix.frames": "300",
+            "kaplay.micromatrix.loop_ms": "0.016"
+          },
+          "bench": {
+            "duration_s": 0.34037476,
+            "engine": "v8",
+            "fps": 940.1402148619951,
+            "frame_ms": {
+              "avg": 0.5117349624633789,
+              "p50": 0.4241490066051483,
+              "p99": 2.1840198040008545,
+              "samples": 320
+            },
+            "frames": 320,
+            "phases_ms": {
+              "audio": {
+                "avg": 0.004011339973658323,
+                "p50": 0.003283000085502863,
+                "p99": 0.006634999997913837,
+                "samples": 320
+              },
+              "drain": {
+                "avg": 0.008121483959257603,
+                "p50": 0.0029329999815672636,
+                "p99": 0.006564999930560589,
+                "samples": 320
+              },
+              "js": {
+                "avg": 0.19853699207305908,
+                "p50": 0.14973999559879303,
+                "p99": 0.8956509828567505,
+                "samples": 320
+              },
+              "network": {
+                "avg": 0.001360140973702073,
+                "p50": 0.0013970000436529517,
+                "p99": 0.001955999992787838,
+                "samples": 320
+              },
+              "present": {
+                "avg": 0.22586111724376678,
+                "p50": 0.19269299507141113,
+                "p99": 1.1381410360336304,
+                "samples": 320
+              }
+            },
+            "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic)"
+          },
+          "runs": [
+            {
+              "status": 0,
+              "js_p50": 0.14973999559879303
+            },
+            {
+              "status": 0,
+              "js_p50": 0.17236898839473724
+            }
+          ]
+        }
+      },
+      "renderer": "AMD Radeon Graphics (radeonsi, renoir, ACO, DRM 3.64, 7.1.5-76070105-generic) (AMD, OpenGL 4.6 (Compatibility Profile) Mesa 26.1.6-1pop0~1787580452~24.04~a5619ea)"
+    }
+  },
+  "baseline": true
+}
