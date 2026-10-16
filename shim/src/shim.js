@@ -4399,6 +4399,49 @@
         steam,
     };
 
+    // ------------------------------------------------- system browser hand-off
+
+    let authWindow = null;
+
+    function openBrowserWindow(url) {
+        if (authWindow || typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+            return null;
+        }
+        if (!native.auth || typeof native.auth.open !== "function") {
+            return null;
+        }
+        if (!native.auth.open(url)) {
+            return null;
+        }
+        authWindow = {
+            closed: false,
+            close() {
+                this.closed = true;
+            },
+            focus() {},
+            blur() {},
+            postMessage() {},
+        };
+        return authWindow;
+    }
+
+    global.__kapNative_onAuthCallback = function (payloadJson) {
+        const pending = authWindow;
+        authWindow = null;
+        if (pending) pending.closed = true;
+        if (!payloadJson) return;
+        let data;
+        try {
+            data = JSON.parse(payloadJson);
+        } catch (error) {
+            console.error("auth callback:", error);
+            return;
+        }
+        const event = makeEvent("message", {});
+        event.data = data;
+        windowListeners.emit(event);
+    };
+
     // ------------------------------------------------------------------ export
 
     const define = (name, value) => {
@@ -4417,6 +4460,7 @@
     define("navigator", navigator);
     define("location", location);
     define("screen", screen);
+    define("open", openBrowserWindow);
     define("console", console);
     define("localStorage", localStorage);
     define("Image", Image);

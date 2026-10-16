@@ -1,4 +1,5 @@
 mod app;
+mod auth;
 mod bridge;
 mod config;
 mod embed;

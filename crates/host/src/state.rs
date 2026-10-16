@@ -56,6 +56,7 @@ pub struct HostState {
     pub audio: Option<Rc<Audio>>,
     pub pending_response: RefCell<Option<HttpResponse>>,
     pub pending_message: RefCell<Option<PendingMessage>>,
+    pub auth: RefCell<Option<crate::auth::AuthServer>>,
     pub game_name: String,
     pub steam: Rc<RefCell<Option<SteamApi>>>,
 }
