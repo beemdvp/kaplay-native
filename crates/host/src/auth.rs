@@ -262,7 +262,9 @@ if (match) {
 }
 button.focus();
 let popup = null;
+let settled = false;
 button.addEventListener("click", () => {
+  if (settled || popup) { return; }
   popup = window.open(provider, "kaplay-native-auth", "popup,width=520,height=760");
   if (!popup) {
     status.textContent = "The sign-in window was blocked. Allow popups and try again.";
@@ -272,10 +274,12 @@ button.addEventListener("click", () => {
   status.textContent = "Complete sign-in in the popup window\u2026";
 });
 window.addEventListener("message", (event) => {
+  if (settled) { return; }
   if (popup && event.source !== popup) { return; }
   const data = event.data;
   if (data === null || typeof data !== "object") { return; }
   if (data.user === undefined && data.token === undefined && data.error === undefined) { return; }
+  settled = true;
   fetch("/" + token + "/callback", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -284,12 +288,15 @@ window.addEventListener("message", (event) => {
     status.textContent = "Signed in. You can close this tab and return to the game.";
     button.hidden = true;
     if (popup && !popup.closed) { popup.close(); }
+  }).catch(() => {
+    status.textContent = "Could not reach the game. Return to the game and try again.";
   });
 });
 setInterval(() => {
-  if (popup && popup.closed) {
+  if (!settled && popup && popup.closed) {
+    settled = true;
     popup = null;
-    status.textContent = "Sign-in cancelled. Return to the game to try again.";
+    status.textContent = "Sign-in cancelled. Return to the game and try again.";
     button.hidden = true;
     fetch("/" + token + "/cancel", { method: "POST" }).catch(() => {});
   }
@@ -344,6 +351,7 @@ mod tests {
         assert!(response.contains(r#""https://game.example/auth/provider/discord?token=abc""#));
         assert!(response.contains("Continue with "));
         assert!(response.contains("window.open(provider"));
+        assert!(response.contains("if (!settled && popup && popup.closed)"));
     }
 
     #[test]
