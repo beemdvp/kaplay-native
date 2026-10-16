@@ -44,17 +44,51 @@ fn percentile(sorted: &[f32], fraction: f32) -> f32 {
 
 fn sample_stats(samples: &std::collections::VecDeque<f32>) -> serde_json::Value {
     if samples.is_empty() {
-        return json!({ "avg": 0.0, "p50": 0.0, "p99": 0.0, "samples": 0 });
+        return json!({
+            "avg": 0.0,
+            "min": 0.0,
+            "p50": 0.0,
+            "p90": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "p999": 0.0,
+            "max": 0.0,
+            "samples": 0
+        });
     }
     let mut sorted: Vec<f32> = samples.iter().copied().collect();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let average = samples.iter().sum::<f32>() / samples.len() as f32;
     json!({
         "avg": average,
+        "min": percentile(&sorted, 0.0),
         "p50": percentile(&sorted, 0.5),
+        "p90": percentile(&sorted, 0.9),
+        "p95": percentile(&sorted, 0.95),
         "p99": percentile(&sorted, 0.99),
+        "p999": percentile(&sorted, 0.999),
+        "max": percentile(&sorted, 1.0),
         "samples": samples.len(),
     })
+}
+
+fn over_budget(samples: &std::collections::VecDeque<f32>, limit_ms: f32) -> usize {
+    samples.iter().filter(|value| **value > limit_ms).count()
+}
+
+fn frame_stats(samples: &std::collections::VecDeque<f32>) -> serde_json::Value {
+    let mut stats = sample_stats(samples);
+    if let Some(object) = stats.as_object_mut() {
+        for (key, limit) in [
+            ("over_16_7", 16.7_f32),
+            ("over_33", 33.3),
+            ("over_50", 50.0),
+            ("over_100", 100.0),
+        ] {
+            object.insert(key.to_string(), json!(over_budget(samples, limit)));
+        }
+    }
+    stats
 }
 
 pub struct HostApp {
@@ -488,6 +522,7 @@ impl HostApp {
         let result = event_loop.run_app(&mut self);
         self.log_frame_stats();
         self.write_bench_json();
+        self.write_frame_trace();
         if let Some(api) = self.steam.borrow_mut().as_mut() {
             api.shutdown();
         }
@@ -810,7 +845,7 @@ impl HostApp {
             "frames": self.frames,
             "duration_s": elapsed,
             "fps": if elapsed > 0.0 { self.frames as f64 / elapsed } else { 0.0 },
-            "frame_ms": sample_stats(&self.frame_ms),
+            "frame_ms": frame_stats(&self.frame_ms),
             "phases_ms": {
                 "js": sample_stats(&self.phases.js),
                 "drain": sample_stats(&self.phases.drain),
@@ -822,6 +857,28 @@ impl HostApp {
         let bytes = serde_json::to_vec_pretty(&summary).unwrap_or_default();
         if let Err(error) = std::fs::write(path, bytes) {
             log::error!("bench json {}: {error}", path.display());
+        }
+    }
+
+    fn write_frame_trace(&self) {
+        let Some(path) = self.config.frame_trace.as_ref() else {
+            return;
+        };
+        let trace = json!({
+            "engine": self.config.js_engine.name(),
+            "frames": self.frames,
+            "frame_ms": self.frame_ms.iter().copied().collect::<Vec<f32>>(),
+            "phases_ms": {
+                "js": self.phases.js.iter().copied().collect::<Vec<f32>>(),
+                "drain": self.phases.drain.iter().copied().collect::<Vec<f32>>(),
+                "network": self.phases.network.iter().copied().collect::<Vec<f32>>(),
+                "audio": self.phases.audio.iter().copied().collect::<Vec<f32>>(),
+                "present": self.phases.present.iter().copied().collect::<Vec<f32>>(),
+            },
+        });
+        let bytes = serde_json::to_vec(&trace).unwrap_or_default();
+        if let Err(error) = std::fs::write(path, bytes) {
+            log::error!("frame trace {}: {error}", path.display());
         }
     }
 
@@ -981,7 +1038,7 @@ impl ApplicationHandler for HostApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_module_entry, percentile};
+    use super::{find_module_entry, frame_stats, percentile};
 
     #[test]
     fn percentiles_land_on_expected_samples() {
@@ -990,6 +1047,19 @@ mod tests {
         assert_eq!(percentile(&samples, 0.5), 51.0);
         assert_eq!(percentile(&samples, 0.99), 99.0);
         assert_eq!(percentile(&[], 0.5), 0.0);
+    }
+
+    #[test]
+    fn frame_stats_count_samples_over_common_budgets() {
+        let samples: std::collections::VecDeque<f32> =
+            [2.0, 10.0, 20.0, 40.0, 120.0].into_iter().collect();
+        let stats = frame_stats(&samples);
+        assert_eq!(stats["over_16_7"], 3);
+        assert_eq!(stats["over_33"], 2);
+        assert_eq!(stats["over_50"], 1);
+        assert_eq!(stats["over_100"], 1);
+        assert_eq!(stats["min"], 2.0);
+        assert_eq!(stats["max"], 120.0);
     }
 
     #[test]

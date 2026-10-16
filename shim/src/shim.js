@@ -83,19 +83,28 @@
     let frames = [];
     let nextTimer = 1;
     let nextFrame = 1;
+    let frameTime = 0;
+    let inFrame = false;
+    const dueTimers = [];
+
+    function timerNow() {
+        return inFrame ? frameTime : native.env.now();
+    }
+
+    const noArgs = [];
 
     function setTimeoutFn(fn, delay) {
-        const args = Array.prototype.slice.call(arguments, 2);
+        const args = arguments.length > 2 ? Array.prototype.slice.call(arguments, 2) : noArgs;
         const id = nextTimer++;
-        timers.set(id, { fn, args, due: native.env.now() + Number(delay || 0), interval: 0 });
+        timers.set(id, { fn, args, due: timerNow() + Number(delay || 0), interval: 0 });
         return id;
     }
 
     function setIntervalFn(fn, delay) {
-        const args = Array.prototype.slice.call(arguments, 2);
+        const args = arguments.length > 2 ? Array.prototype.slice.call(arguments, 2) : noArgs;
         const id = nextTimer++;
         const interval = Math.max(1, Number(delay || 0));
-        timers.set(id, { fn, args, due: native.env.now() + interval, interval });
+        timers.set(id, { fn, args, due: timerNow() + interval, interval });
         return id;
     }
 
@@ -116,11 +125,19 @@
 
     function tickTimers(now) {
         if (timers.size === 0) return;
-        const due = [];
+        const due = dueTimers;
+        due.length = 0;
+        let ordered = true;
+        let previousDue = -Infinity;
         for (const entry of timers) {
-            if (entry[1].due <= now) due.push(entry);
+            const timer = entry[1];
+            if (timer.due <= now) {
+                if (timer.due < previousDue) ordered = false;
+                previousDue = timer.due;
+                due.push(entry);
+            }
         }
-        due.sort((a, b) => a[1].due - b[1].due || a[0] - b[0]);
+        if (!ordered) due.sort((a, b) => a[1].due - b[1].due || a[0] - b[0]);
         for (const [id, timer] of due) {
             if (!timers.has(id)) continue;
             if (timer.interval > 0) timer.due = now + timer.interval;
@@ -131,6 +148,7 @@
                 reportError(error);
             }
         }
+        due.length = 0;
     }
 
     // ------------------------------------------------------------------ base64
@@ -3000,6 +3018,8 @@
     let mouseButtons = 0;
 
     global.__kapNative_onFrame = function (now) {
+        inFrame = true;
+        frameTime = now;
         tickTimers(now);
         const queue = frames;
         frames = [];
@@ -3011,6 +3031,7 @@
             }
         }
         audioTick();
+        inFrame = false;
     };
 
     global.__kapNative_dispatch = function (type, payloadJson) {
