@@ -69,10 +69,11 @@ Keyboard events carry `key`, `code`, `repeat`, modifier flags, and
 While an `input` or `textarea` is focused, keys go to it like they do in a
 browser: printable keys and Backspace edit `value` and fire `input` (Enter adds
 a line break to a `textarea`), `maxLength` is enforced, and the canvas does not
-receive those keys. Removing the focused element, or clicking the canvas,
-releases focus so the game gets its keys back. DOM elements are not rendered,
-so games draw their own fields and keep the DOM field as an invisible input
-over them.
+receive those keys. A click inside a positioned field focuses it, which is how
+a field that a game draws with canvas graphics still receives focus; a click
+anywhere else releases focus so the game gets its keys back. DOM elements are
+not rendered, so games draw their own fields and keep the DOM field as an
+invisible input over them.
 
 Setting `cursor` on a `style` (`style.cursor`, or `cursor: ...` inside
 `cssText`) changes the real OS cursor. `none` hides it, which is what

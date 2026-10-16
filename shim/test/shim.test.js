@@ -1133,3 +1133,47 @@ test("removing or clicking away from a focused input releases the keys", () => {
     wrapper.remove();
     assert.equal(document.activeElement, null);
 });
+
+test("clicking a positioned text control focuses it instead of the canvas", () => {
+    const canvas = makeCanvas();
+    const canvasPresses = [];
+    canvas.addEventListener("mousedown", () => canvasPresses.push("canvas"));
+
+    const input = document.createElement("input");
+    input.maxLength = 16;
+    document.body.appendChild(input);
+    input.style = "position:absolute;left:40px;top:40px;width:120px;height:30px;opacity:0";
+    input.addEventListener("click", () => input.focus());
+    input.click();
+    assert.equal(document.activeElement, input);
+
+    globalThis.__kapNative_dispatch("mousedown", JSON.stringify({ clientX: 60, clientY: 50, button: 0 }));
+    globalThis.__kapNative_dispatch("mouseup", JSON.stringify({ clientX: 60, clientY: 50, button: 0 }));
+    assert.equal(document.activeElement, input);
+    assert.deepEqual(canvasPresses, []);
+
+    globalThis.__kapNative_dispatch("keydown", JSON.stringify({ key: "a", code: "KeyA", repeat: false }));
+    assert.equal(input.value, "a");
+
+    globalThis.__kapNative_dispatch("mousedown", JSON.stringify({ clientX: 300, clientY: 200, button: 0 }));
+    globalThis.__kapNative_dispatch("mouseup", JSON.stringify({ clientX: 300, clientY: 200, button: 0 }));
+    assert.equal(document.activeElement, null);
+    assert.deepEqual(canvasPresses, ["canvas"]);
+    input.remove();
+});
+
+test("text controls behind the canvas keep clicks on the canvas", () => {
+    const canvas = makeCanvas();
+    const canvasPresses = [];
+    canvas.addEventListener("mousedown", () => canvasPresses.push("canvas"));
+
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.style = "position:absolute;left:10px;top:10px;width:80px;height:20px;z-index:-999";
+
+    globalThis.__kapNative_dispatch("mousedown", JSON.stringify({ clientX: 20, clientY: 15, button: 0 }));
+    globalThis.__kapNative_dispatch("mouseup", JSON.stringify({ clientX: 20, clientY: 15, button: 0 }));
+    assert.equal(canvasPresses.length, 1);
+    assert.notEqual(document.activeElement, input);
+    input.remove();
+});

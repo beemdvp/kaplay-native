@@ -3037,12 +3037,53 @@
         event.movementX = payload.movementX || 0;
         event.movementY = payload.movementY || 0;
         event.buttons = mouseButtons;
+        if (type === "mousedown" || type === "mouseup") {
+            const target = textControlAt(position.x, position.y);
+            if (target) {
+                event.target = target;
+                if (type === "mousedown") target.focus();
+                target.__emit(type, event);
+                if (type === "mouseup") {
+                    const click = makeEvent("click", {});
+                    click.target = target;
+                    target.__emit("click", click);
+                }
+                documentListeners.emit(event);
+                windowListeners.emit(event);
+                return;
+            }
+        }
         if (type === "mousedown" && isTextControl(document.activeElement)) document.activeElement.blur();
         canvasListeners.emit(event);
     }
 
     function isTextControl(element) {
         return element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
+    }
+
+    function styleLength(value) {
+        if (typeof value === "number") return value;
+        if (typeof value === "string" && value.trim().endsWith("px")) return parseFloat(value) || 0;
+        return null;
+    }
+
+    function textControlAt(x, y) {
+        let hit = null;
+        for (const element of createdElements) {
+            if (!isTextControl(element) || !isAttached(element)) continue;
+            const style = element.__style;
+            if (style.display === "none" || style.visibility === "hidden" || style.pointerEvents === "none") continue;
+            if (style.position !== "absolute" && style.position !== "fixed") continue;
+            const zIndex = Number(style.zIndex);
+            if (Number.isFinite(zIndex) && zIndex < 0) continue;
+            const left = styleLength(style.left);
+            const top = styleLength(style.top);
+            const width = styleLength(style.width);
+            const height = styleLength(style.height);
+            if (left === null || top === null || width === null || height === null) continue;
+            if (x >= left && x <= left + width && y >= top && y <= top + height) hit = element;
+        }
+        return hit;
     }
 
     function editTextValue(element, event) {
