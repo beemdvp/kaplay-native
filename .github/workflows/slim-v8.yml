@@ -158,6 +158,10 @@ jobs:
           fi
           cp "$slim" "slim-v8-host${{ matrix.exe }}"
           cargo build --release -p kaplay-native-host
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            # Windows resolves opengl32.dll next to the exe, not in the cwd.
+            cp mesa/x64/*.dll target/release/
+          fi
           run() {
             if [ "${{ runner.os }}" = "Linux" ]; then
               xvfb-run -a "$@"
