@@ -116,19 +116,22 @@ enabled, and the published crate prunes the generator script, so it cannot be
 built from the crate source at all. Disabling Maglev would save ~2.3 MB more
 but removes the mid-tier JIT that keeps V8 attractive.
 
-The script supports Linux hosts, caches gn and LLVM (libclang 21+ is required
-by bindgen) in `~/.cache/kaplay-native`, and applies the same ICF link flags
-when `ld.lld` is available (including rustup's toolchain copy). The `Slim V8`
-workflow runs it on GitHub for Linux x64 and arm64, smoke-tests the host
-against QuickJS, and publishes `librusty_v8_slim_<version>_<target>.a` on a
-`slim-v8-<version>` release. Each job records the script hash as `config=<hash>`
-in the release notes and skips itself when that asset is already published for
-the same config, so only a V8 version bump or a script change rebuilds it. `release.yml` downloads that asset for Linux and
-links the `-v8` hosts against it with `RUSTY_V8_ARCHIVE` (the prebuilt bindings
-are compatible), falling back to the prebuilt archive when the release is
-missing. macOS and Windows keep the prebuilt archive, and with it `Intl`,
-`WebAssembly` and `Temporal`, until their archives exist. Any host can link a
-local slim archive with `RUSTY_V8_ARCHIVE=path/to/librusty_v8.a`.
+The script supports Linux, macOS and Windows hosts, caches gn and LLVM
+(libclang 21+ is required by bindgen) in `~/.cache/kaplay-native`, and applies
+the same ICF link flags when `ld.lld` is available (including rustup's
+toolchain copy). The `Slim V8` workflow runs it on GitHub for Linux x64, Linux
+arm64, macOS arm64, macOS x64 (cross-built) and Windows x64, smoke-tests the
+host against QuickJS where the runner can, and publishes
+`librusty_v8_slim_<version>_<target>.a` (`.lib` on Windows) on a
+`slim-v8-<version>` release. Each job records `config=<version>-<recipe>` in
+the release notes and skips itself when its asset is already published for
+that recipe, so plumbing fixes leave published archives alone; bump
+`SLIM_V8_RECIPE` in the script when the GN args or the crate patches change.
+`release.yml` downloads that asset for every platform and links the `-v8`
+hosts against it with `RUSTY_V8_ARCHIVE` (the prebuilt bindings are
+compatible), falling back to the prebuilt archive when the release is missing.
+Any host can link a local slim archive with
+`RUSTY_V8_ARCHIVE=path/to/librusty_v8.a`.
 
 Remaining bundle-size candidates:
 

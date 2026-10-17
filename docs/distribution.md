@@ -30,11 +30,12 @@ Overrides: `--host <path>`, `KAPLAY_NATIVE_HOST`, and `KAPLAY_NATIVE_CACHE`.
 
 Each release ships two host flavors per platform: the default QuickJS binary
 (`kaplay-native-host-<platform>`) and the V8 binary
-(`kaplay-native-host-<platform>-v8`). On Linux the V8 host links against the
-slim archive published by the `Slim V8` workflow and adds ~20 MB; other
-platforms currently use the prebuilt archive and add ~40 MB. The CLI downloads
-the default one unless the command asks for V8 with `--js-engine v8`, so a game
-built for the default engine never carries the V8 runtime.
+(`kaplay-native-host-<platform>-v8`). Every V8 host links against the slim
+archive published by the `Slim V8` workflow, which drops i18n, WebAssembly and
+Temporal and adds roughly 20 MB instead of the ~40 MB the prebuilt archive
+adds. The CLI downloads the default one unless the command asks for V8 with
+`--js-engine v8`, so a game built for the default engine never carries the V8
+runtime.
 
 ## Pack a game
 
@@ -183,7 +184,9 @@ and released, and npm publishing is skipped. The npm version always matches the
 tag because the release workflow rewrites `cli/package.json` from the tag
 before publishing.
 
-Linux V8 hosts link against the slim archive published by the `Slim V8`
-workflow when a `slim-v8-<version>` release exists, and fall back to the
-prebuilt V8 archive otherwise. Run `Slim V8` once after upgrading the `v8`
-crate; it smoke-tests the archive against QuickJS before publishing it.
+Every V8 host links against the slim archive published by the `Slim V8`
+workflow when a `slim-v8-<version>` release exists, and falls back to the
+prebuilt V8 archive otherwise. The workflow builds the archive natively on each
+platform, and cross-builds the macOS x64 archive on the arm64 runner. Run
+`Slim V8` once after upgrading the `v8` crate; it smoke-tests the archive
+against QuickJS before publishing it.
