@@ -112,7 +112,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          version=$(sed -n '/^name = "v8"$/{n;s/^version = "\(.*\)"$/\1/p;q}' Cargo.lock)
+          version=$(awk -F'"' '/^name = "v8"$/{getline; print $2; exit}' Cargo.lock)
           asset=librusty_v8_slim_${version}_${{ matrix.target }}${{ matrix.lib_ext }}
           if gh release download "slim-v8-$version" -p "$asset" -D "$RUNNER_TEMP/slim-v8" --clobber 2>/dev/null; then
             echo "RUSTY_V8_ARCHIVE=$RUNNER_TEMP/slim-v8/$asset" >> "$GITHUB_ENV"

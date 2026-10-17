@@ -76,7 +76,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          version=$(sed -n '/^name = "v8"$/{n;s/^version = "\(.*\)"$/\1/p;q}' Cargo.lock)
+          version=$(awk -F'"' '/^name = "v8"$/{getline; print $2; exit}' Cargo.lock)
           asset=librusty_v8_slim_${version}_${{ matrix.target }}${{ matrix.ext }}
           notes=$(gh release view "slim-v8-$version" --json body -q .body 2>/dev/null || true)
           if printf '%s' "$notes" | grep -qF "config=$SLIM_V8_CONFIG" &&
@@ -167,7 +167,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          version=$(sed -n '/^name = "v8"$/{n;s/^version = "\(.*\)"$/\1/p;q}' Cargo.lock)
+          version=$(awk -F'"' '/^name = "v8"$/{getline; print $2; exit}' Cargo.lock)
           tag=slim-v8-$version
           asset=librusty_v8_slim_${version}_${{ matrix.target }}${{ matrix.ext }}
           notes=$(printf 'V8 %s without i18n, WebAssembly and Temporal, built for the kaplay-native v8 hosts.\n\nconfig=%s' "$version" "$SLIM_V8_CONFIG")
