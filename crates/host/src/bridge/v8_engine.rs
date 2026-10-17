@@ -169,6 +169,7 @@ pub fn install(
     install_audio(scope, native, data);
     install_video(scope, native, data);
     install_steam(scope, native, data);
+    install_updates(scope, native, data);
 
     let global = scope.get_current_context().global(scope);
     set_property(scope, global, "__kapNative", native.into());
@@ -1149,6 +1150,22 @@ fn install_steam(scope: &PinScope<'_, '_>, native: Local<v8::Object>, data: Loca
     register(scope, object, "deleteCloud", steam_delete_cloud, data);
     register(scope, object, "runCallbacks", steam_run_callbacks, data);
     set_property(scope, native, "steam", object.into());
+}
+
+fn install_updates(scope: &PinScope<'_, '_>, native: Local<v8::Object>, data: Local<Value>) {
+    let object = v8::Object::new(scope);
+    register(scope, object, "snapshot", updates_snapshot, data);
+    register(scope, object, "apply", updates_apply, data);
+    set_property(scope, native, "updates", object.into());
+}
+
+fn updates_snapshot<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
+    let state = host(&args);
+    set_string(scope, &mut rv, &state.updates.snapshot_json());
+}
+
+fn updates_apply<'s, 'i>(_scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
+    rv.set_bool(host(&args).updates.request_restart());
 }
 
 fn steam_available<'s, 'i>(_scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {

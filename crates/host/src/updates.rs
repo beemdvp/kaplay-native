@@ -1,6 +1,8 @@
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
@@ -12,12 +14,28 @@ const MANIFEST_LIMIT: u64 = 1024 * 1024;
 const PAK_LIMIT: u64 = 512 * 1024 * 1024;
 const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const UPDATE_THREAD_STACK: usize = 512 * 1024;
+const USER_AGENT: &str = concat!("kaplay-native/", env!("CARGO_PKG_VERSION"));
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSettings {
     pub url: String,
-    pub public_key: String,
+    #[serde(default)]
+    pub public_key: Option<String>,
+    #[serde(default)]
+    pub public_keys: Vec<String>,
+}
+
+impl UpdateSettings {
+    fn keys(&self) -> Vec<&str> {
+        let mut keys: Vec<&str> = self.public_keys.iter().map(String::as_str).collect();
+        if let Some(key) = self.public_key.as_deref() {
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
+        }
+        keys
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,6 +55,10 @@ struct ManifestContent {
     url: String,
     sha256: String,
     size: u64,
+    #[serde(default)]
+    rollout: Option<u8>,
+    #[serde(default)]
+    required: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,7 +73,131 @@ pub struct Installed {
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CheckState {
+    #[serde(default)]
     last_check: u64,
+    #[serde(default)]
+    etag: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Snapshot {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+    required: bool,
+    progress: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct UpdateState {
+    snapshot: Mutex<Snapshot>,
+    progress: AtomicU8,
+    restart: AtomicBool,
+}
+
+impl UpdateState {
+    pub fn new(current: Option<String>) -> Self {
+        UpdateState {
+            snapshot: Mutex::new(Snapshot {
+                status: "idle",
+                current,
+                version: None,
+                required: false,
+                progress: 0,
+                error: None,
+            }),
+            progress: AtomicU8::new(0),
+            restart: AtomicBool::new(false),
+        }
+    }
+
+    fn set(
+        &self,
+        status: &'static str,
+        version: Option<String>,
+        required: bool,
+        error: Option<String>,
+    ) {
+        if let Ok(mut snapshot) = self.snapshot.lock() {
+            snapshot.status = status;
+            snapshot.version = version;
+            snapshot.required = required;
+            snapshot.error = error;
+        }
+    }
+
+    pub fn set_checking(&self) {
+        self.progress.store(0, Ordering::Relaxed);
+        self.set("checking", None, false, None);
+    }
+
+    pub fn set_up_to_date(&self, version: Option<String>) {
+        self.progress.store(0, Ordering::Relaxed);
+        self.set("up-to-date", version, false, None);
+    }
+
+    pub fn set_downloading(&self, version: &str, required: bool) {
+        self.progress.store(0, Ordering::Relaxed);
+        self.set("downloading", Some(version.to_string()), required, None);
+    }
+
+    pub fn set_progress(&self, downloaded: u64, total: u64) {
+        let progress = downloaded
+            .saturating_mul(100)
+            .checked_div(total)
+            .unwrap_or(0)
+            .min(100) as u8;
+        self.progress.store(progress, Ordering::Relaxed);
+    }
+
+    pub fn set_ready(&self, version: &str, required: bool) {
+        self.progress.store(100, Ordering::Relaxed);
+        self.set("ready", Some(version.to_string()), required, None);
+    }
+
+    pub fn set_error(&self, message: &str) {
+        self.progress.store(0, Ordering::Relaxed);
+        self.set("error", None, false, Some(message.to_string()));
+    }
+
+    pub fn snapshot_json(&self) -> String {
+        let mut snapshot = match self.snapshot.lock() {
+            Ok(snapshot) => snapshot.clone(),
+            Err(_) => Snapshot {
+                status: "error",
+                current: None,
+                version: None,
+                required: false,
+                progress: 0,
+                error: Some("update state is unavailable".to_string()),
+            },
+        };
+        snapshot.progress = self.progress.load(Ordering::Relaxed);
+        serde_json::to_string(&snapshot).unwrap_or_else(|_| {
+            "{\"status\":\"error\",\"required\":false,\"progress\":0}".to_string()
+        })
+    }
+
+    pub fn request_restart(&self) -> bool {
+        let ready = self
+            .snapshot
+            .lock()
+            .map(|snapshot| snapshot.status == "ready")
+            .unwrap_or(false);
+        if ready {
+            self.restart.store(true, Ordering::SeqCst);
+        }
+        ready
+    }
+
+    pub fn restart_requested(&self) -> bool {
+        self.restart.load(Ordering::SeqCst)
+    }
 }
 
 pub fn updates_dir(save_dir: &Path) -> PathBuf {
@@ -141,42 +287,65 @@ pub fn spawn_check(
     save_dir: PathBuf,
     game_id: String,
     current_version: String,
+    state: Arc<UpdateState>,
 ) {
     let Some(game_id) = safe_component(&game_id).map(str::to_owned) else {
         log::warn!("ignoring update settings without a valid game id");
+        state.set_error("invalid game id");
         return;
     };
     let host_version = env!("CARGO_PKG_VERSION").to_string();
+    let thread_state = Arc::clone(&state);
     let spawned = std::thread::Builder::new()
         .name("kaplay-native-update".to_string())
         .stack_size(UPDATE_THREAD_STACK)
         .spawn(move || {
             let dir = updates_dir(&save_dir);
             if let Err(error) = fs::create_dir_all(&dir) {
-                log::warn!("failed to prepare {}: {error}", dir.display());
+                let message = format!("failed to prepare {}: {error}", dir.display());
+                log::warn!("{message}");
+                thread_state.set_error(&message);
                 return;
             }
-            if !check_due(&dir) {
+            let mut check_state = read_check_state(&dir);
+            if now_seconds().saturating_sub(check_state.last_check) < CHECK_INTERVAL.as_secs() {
                 log::debug!("content update check is not due yet");
                 return;
             }
-            write_check_time(&dir);
+            check_state.last_check = now_seconds();
+            write_check_state(&dir, &check_state);
+            thread_state.set_checking();
             match check(
                 &settings,
                 &save_dir,
                 &game_id,
                 &current_version,
                 &host_version,
+                check_state.etag.as_deref(),
+                &thread_state,
             ) {
-                Ok(Some(version)) => log::info!(
-                    "content update {version} installed; it will be used on the next launch"
-                ),
-                Ok(None) => log::debug!("no content update available"),
-                Err(error) => log::warn!("content update check failed: {error}"),
+                Ok((version, etag)) => {
+                    if etag.is_some() {
+                        check_state.etag = etag;
+                    }
+                    write_check_state(&dir, &check_state);
+                    match version {
+                        Some(version) => log::info!(
+                            "content update {version} installed; it will be used on the next launch"
+                        ),
+                        None => log::debug!("no content update available"),
+                    }
+                }
+                Err(error) => {
+                    thread_state.set_error(&error);
+                    log::warn!("content update check failed: {error}");
+                }
             }
         });
     if let Err(error) = spawned {
-        log::warn!("failed to start the content update check: {error}");
+        let message = format!("failed to start the content update check: {error}");
+        log::warn!("{message}");
+        state.set_error(&message);
     }
 }
 
@@ -186,10 +355,20 @@ fn check(
     game_id: &str,
     current_version: &str,
     host_version: &str,
-) -> Result<Option<String>, String> {
+    etag: Option<&str>,
+    state: &UpdateState,
+) -> Result<(Option<String>, Option<String>), String> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let agent = agent();
-    let manifest_bytes = fetch(&agent, &settings.url, MANIFEST_LIMIT, "application/json")?;
+    let ManifestResponse {
+        not_modified,
+        body,
+        etag: response_etag,
+    } = fetch_manifest(&agent, &settings.url, etag)?;
+    if not_modified {
+        state.set_up_to_date(None);
+        return Ok((None, None));
+    }
     let signature_bytes = fetch(
         &agent,
         &signature_url(&settings.url),
@@ -198,25 +377,38 @@ fn check(
     )?;
     let signature = std::str::from_utf8(&signature_bytes)
         .map_err(|_| "the manifest signature is not valid utf-8".to_string())?;
-    let host = Version::parse(host_version)
-        .map_err(|error| format!("invalid host version {host_version}: {error}"))?;
-    let content = verify_manifest(
-        &manifest_bytes,
-        signature,
-        &settings.public_key,
-        game_id,
-        &host,
-    )?;
+    let keys = settings.keys();
+    let content = verify_manifest(&body, signature, &keys, game_id)?;
     let current = Version::parse(current_version).unwrap_or_else(|_| Version::new(0, 0, 0));
     let next = Version::parse(&content.version)
         .map_err(|error| format!("invalid content version {}: {error}", content.version))?;
     if next <= current {
-        return Ok(None);
+        state.set_up_to_date(Some(content.version));
+        return Ok((None, response_etag));
     }
+    let host = Version::parse(host_version)
+        .map_err(|error| format!("invalid host version {host_version}: {error}"))?;
+    if !host_supports(&content, &host)? {
+        log::info!(
+            "content {} needs a newer host; keeping the current content",
+            content.version
+        );
+        state.set_up_to_date(Some(content.version));
+        return Ok((None, response_etag));
+    }
+    if !rollout_allows(&content, save_dir, game_id) {
+        log::info!(
+            "content {} is not rolled out to this install yet",
+            content.version
+        );
+        state.set_up_to_date(Some(content.version));
+        return Ok((None, response_etag));
+    }
+    state.set_downloading(&content.version, content.required);
     let dir = updates_dir(save_dir);
     fs::create_dir_all(&dir)
         .map_err(|error| format!("failed to create {}: {error}", dir.display()))?;
-    let (temp, size, hash) = download(&agent, &content.url, content.size, &dir)?;
+    let (temp, size, hash) = download(&agent, &content.url, content.size, &dir, state)?;
     if size != content.size || hash != content.sha256.to_ascii_lowercase() {
         let _ = fs::remove_file(&temp);
         return Err("downloaded content does not match the manifest".to_string());
@@ -225,7 +417,8 @@ fn check(
         let _ = fs::remove_file(&temp);
         return Err(error);
     }
-    Ok(Some(content.version))
+    state.set_ready(&content.version, content.required);
+    Ok((Some(content.version), response_etag))
 }
 
 fn agent() -> ureq::Agent {
@@ -237,14 +430,61 @@ fn agent() -> ureq::Agent {
         .new_agent()
 }
 
+struct ManifestResponse {
+    not_modified: bool,
+    body: Vec<u8>,
+    etag: Option<String>,
+}
+
+fn fetch_manifest(
+    agent: &ureq::Agent,
+    url: &str,
+    etag: Option<&str>,
+) -> Result<ManifestResponse, String> {
+    let mut request = agent
+        .get(url)
+        .header("Accept", "application/json")
+        .header("User-Agent", USER_AGENT);
+    if let Some(etag) = etag {
+        request = request.header("If-None-Match", etag);
+    }
+    let response = request
+        .call()
+        .map_err(|error| format!("GET {url}: {error}"))?;
+    let status = response.status();
+    if status.as_u16() == 304 {
+        return Ok(ManifestResponse {
+            not_modified: true,
+            body: Vec::new(),
+            etag: None,
+        });
+    }
+    if !status.is_success() {
+        return Err(format!("GET {url}: HTTP {}", status.as_u16()));
+    }
+    let etag = response
+        .headers()
+        .get("etag")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let mut body = response.into_body();
+    let bytes = body
+        .with_config()
+        .limit(MANIFEST_LIMIT)
+        .read_to_vec()
+        .map_err(|error| format!("GET {url}: {error}"))?;
+    Ok(ManifestResponse {
+        not_modified: false,
+        body: bytes,
+        etag,
+    })
+}
+
 fn fetch(agent: &ureq::Agent, url: &str, limit: u64, accept: &str) -> Result<Vec<u8>, String> {
     let response = agent
         .get(url)
         .header("Accept", accept)
-        .header(
-            "User-Agent",
-            concat!("kaplay-native/", env!("CARGO_PKG_VERSION")),
-        )
+        .header("User-Agent", USER_AGENT)
         .call()
         .map_err(|error| format!("GET {url}: {error}"))?;
     let status = response.status();
@@ -263,16 +503,14 @@ fn download(
     url: &str,
     expected: u64,
     dir: &Path,
+    state: &UpdateState,
 ) -> Result<(PathBuf, u64, String), String> {
     let temp = dir.join(format!("download-{}.tmp", std::process::id()));
     let result = (|| {
         let response = agent
             .get(url)
             .header("Accept", "application/octet-stream")
-            .header(
-                "User-Agent",
-                concat!("kaplay-native/", env!("CARGO_PKG_VERSION")),
-            )
+            .header("User-Agent", USER_AGENT)
             .call()
             .map_err(|error| format!("GET {url}: {error}"))?;
         let status = response.status();
@@ -296,6 +534,7 @@ fn download(
                 .map_err(|error| format!("failed to write {}: {error}", temp.display()))?;
             hasher.update(&chunk[..read]);
             size += read as u64;
+            state.set_progress(size, expected);
         }
         file.sync_all()
             .map_err(|error| format!("failed to write {}: {error}", temp.display()))?;
@@ -326,22 +565,31 @@ fn signature_url(url: &str) -> String {
 fn verify_manifest(
     bytes: &[u8],
     signature: &str,
-    public_key: &str,
+    keys: &[&str],
     game_id: &str,
-    host: &Version,
 ) -> Result<ManifestContent, String> {
-    let key = base64::engine::general_purpose::STANDARD
-        .decode(public_key.trim())
-        .map_err(|error| format!("invalid update public key: {error}"))?;
-    if key.len() != 32 {
-        return Err("update public key must be 32 bytes".to_string());
-    }
     let signature = base64::engine::general_purpose::STANDARD
         .decode(signature.trim())
         .map_err(|error| format!("invalid manifest signature: {error}"))?;
-    ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, &key)
-        .verify(bytes, &signature)
-        .map_err(|_| "manifest signature does not match".to_string())?;
+    let mut verified = false;
+    for key in keys {
+        let Ok(key) = base64::engine::general_purpose::STANDARD.decode(key.trim()) else {
+            continue;
+        };
+        if key.len() != 32 {
+            continue;
+        }
+        if ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, &key)
+            .verify(bytes, &signature)
+            .is_ok()
+        {
+            verified = true;
+            break;
+        }
+    }
+    if !verified {
+        return Err("manifest signature does not match a trusted key".to_string());
+    }
     let manifest: Manifest =
         serde_json::from_slice(bytes).map_err(|error| format!("invalid manifest: {error}"))?;
     if manifest.format != MANIFEST_FORMAT {
@@ -372,16 +620,58 @@ fn verify_manifest(
     Version::parse(&content.version)
         .map_err(|error| format!("invalid content version {}: {error}", content.version))?;
     if let Some(min_host) = &content.min_host {
-        let min_host = Version::parse(min_host)
-            .map_err(|error| format!("invalid minHost {min_host}: {error}"))?;
-        if *host < min_host {
-            return Err(format!(
-                "content {} needs host {min_host}, this is {host}",
-                content.version
-            ));
-        }
+        Version::parse(min_host).map_err(|error| format!("invalid minHost {min_host}: {error}"))?;
+    }
+    if content.rollout.is_some_and(|rollout| rollout > 100) {
+        return Err("manifest rollout must be between 0 and 100".to_string());
     }
     Ok(content)
+}
+
+fn host_supports(content: &ManifestContent, host: &Version) -> Result<bool, String> {
+    let Some(min_host) = &content.min_host else {
+        return Ok(true);
+    };
+    let min_host =
+        Version::parse(min_host).map_err(|error| format!("invalid minHost {min_host}: {error}"))?;
+    Ok(*host >= min_host)
+}
+
+fn rollout_allows(content: &ManifestContent, save_dir: &Path, game_id: &str) -> bool {
+    let rollout = content.rollout.unwrap_or(100);
+    if rollout >= 100 {
+        return true;
+    }
+    let bucket = install_bucket(save_dir, game_id).unwrap_or(0);
+    bucket < rollout
+}
+
+fn install_bucket(save_dir: &Path, game_id: &str) -> Option<u8> {
+    let id = install_id(save_dir)?;
+    let mut context = ring::digest::Context::new(&ring::digest::SHA256);
+    context.update(id.as_bytes());
+    context.update(b":");
+    context.update(game_id.as_bytes());
+    let digest = context.finish();
+    Some((u16::from_be_bytes([digest.as_ref()[0], digest.as_ref()[1]]) % 100) as u8)
+}
+
+fn install_id(save_dir: &Path) -> Option<String> {
+    let path = save_dir.join("install-id");
+    if let Ok(text) = fs::read_to_string(&path) {
+        let text = text.trim();
+        if !text.is_empty() {
+            return Some(text.to_string());
+        }
+    }
+    fs::create_dir_all(save_dir).ok()?;
+    use ring::rand::SecureRandom;
+    let rng = ring::rand::SystemRandom::new();
+    let mut bytes = [0u8; 16];
+    rng.fill(&mut bytes).ok()?;
+    let id: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    write_atomic(&path, id.as_bytes()).ok()?;
+    Some(id)
 }
 
 #[cfg(test)]
@@ -493,21 +783,15 @@ fn is_sha256(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn check_due(dir: &Path) -> bool {
-    let Ok(text) = fs::read_to_string(dir.join("state.json")) else {
-        return true;
-    };
-    let Ok(state) = serde_json::from_str::<CheckState>(&text) else {
-        return true;
-    };
-    now_seconds().saturating_sub(state.last_check) >= CHECK_INTERVAL.as_secs()
+fn read_check_state(dir: &Path) -> CheckState {
+    fs::read_to_string(dir.join("state.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
 }
 
-fn write_check_time(dir: &Path) {
-    let state = CheckState {
-        last_check: now_seconds(),
-    };
-    let Ok(json) = serde_json::to_vec(&state) else {
+fn write_check_state(dir: &Path, state: &CheckState) {
+    let Ok(json) = serde_json::to_vec(state) else {
         return;
     };
     let _ = write_atomic(&dir.join("state.json"), &json);
@@ -574,6 +858,8 @@ mod tests {
             url: "https://cdn.example.com/game.pak".to_string(),
             sha256: sha256_hex(bytes),
             size: bytes.len() as u64,
+            rollout: None,
+            required: false,
         }
     }
 
@@ -586,16 +872,30 @@ mod tests {
             b"pak",
             "bridge",
         );
-        let content = verify_manifest(
-            &bytes,
-            &signature(&pair, &bytes),
-            &key,
-            "bridge",
-            &Version::new(0, 1, 0),
-        )
-        .unwrap();
+        let content =
+            verify_manifest(&bytes, &signature(&pair, &bytes), &[key.as_str()], "bridge").unwrap();
         assert_eq!(content.version, "1.2.0");
         assert_eq!(content.size, 3);
+        assert!(!content.required);
+    }
+
+    #[test]
+    fn verifies_with_any_trusted_key() {
+        let (first, _) = keypair();
+        let (second, pair) = keypair();
+        let bytes = manifest(
+            "https://cdn.example.com/game.pak",
+            "1.2.0",
+            b"pak",
+            "bridge",
+        );
+        let result = verify_manifest(
+            &bytes,
+            &signature(&pair, &bytes),
+            &[first.as_str(), second.as_str()],
+            "bridge",
+        );
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -609,8 +909,7 @@ mod tests {
         );
         let sig = signature(&pair, &bytes);
         bytes[0] = b'[';
-        let error =
-            verify_manifest(&bytes, &sig, &key, "bridge", &Version::new(0, 1, 0)).unwrap_err();
+        let error = verify_manifest(&bytes, &sig, &[key.as_str()], "bridge").unwrap_err();
         assert!(error.contains("signature"));
     }
 
@@ -626,16 +925,38 @@ mod tests {
         let error = verify_manifest(
             &bytes,
             &signature(&pair, &bytes),
-            &key,
+            &[key.as_str()],
             "other-game",
-            &Version::new(0, 1, 0),
         )
         .unwrap_err();
         assert!(error.contains("other-game"));
     }
 
     #[test]
-    fn rejects_a_newer_minimum_host() {
+    fn reads_rollout_and_required() {
+        let (key, pair) = keypair();
+        let bytes = serde_json::json!({
+            "format": 1,
+            "gameId": "bridge",
+            "content": {
+                "version": "1.2.0",
+                "url": "https://cdn.example.com/game.pak",
+                "sha256": sha256_hex(b"pak"),
+                "size": 3,
+                "rollout": 25,
+                "required": true,
+            }
+        })
+        .to_string()
+        .into_bytes();
+        let content =
+            verify_manifest(&bytes, &signature(&pair, &bytes), &[key.as_str()], "bridge").unwrap();
+        assert_eq!(content.rollout, Some(25));
+        assert!(content.required);
+    }
+
+    #[test]
+    fn checks_the_minimum_host() {
         let (key, pair) = keypair();
         let bytes = serde_json::json!({
             "format": 1,
@@ -650,15 +971,10 @@ mod tests {
         })
         .to_string()
         .into_bytes();
-        let error = verify_manifest(
-            &bytes,
-            &signature(&pair, &bytes),
-            &key,
-            "bridge",
-            &Version::new(0, 1, 0),
-        )
-        .unwrap_err();
-        assert!(error.contains("needs host"));
+        let content =
+            verify_manifest(&bytes, &signature(&pair, &bytes), &[key.as_str()], "bridge").unwrap();
+        assert!(!host_supports(&content, &Version::new(0, 1, 0)).unwrap());
+        assert!(host_supports(&content, &Version::new(0, 2, 0)).unwrap());
     }
 
     #[test]
@@ -695,6 +1011,46 @@ mod tests {
     }
 
     #[test]
+    fn exposes_update_status_and_restart() {
+        let state = UpdateState::new(Some("1.0.0".to_string()));
+        let snapshot: serde_json::Value = serde_json::from_str(&state.snapshot_json()).unwrap();
+        assert_eq!(snapshot["status"], "idle");
+        assert_eq!(snapshot["current"], "1.0.0");
+        assert!(!state.request_restart());
+
+        state.set_ready("1.1.0", true);
+        let snapshot: serde_json::Value = serde_json::from_str(&state.snapshot_json()).unwrap();
+        assert_eq!(snapshot["status"], "ready");
+        assert_eq!(snapshot["version"], "1.1.0");
+        assert_eq!(snapshot["required"], true);
+        assert_eq!(snapshot["progress"], 100);
+        assert!(state.request_restart());
+        assert!(state.restart_requested());
+    }
+
+    #[test]
+    fn rollout_uses_a_stable_bucket() {
+        let save_dir = temp_dir("rollout");
+        fs::write(
+            save_dir.join("install-id"),
+            "00112233445566778899aabbccddeeff",
+        )
+        .unwrap();
+        let bucket = install_bucket(&save_dir, "bridge").unwrap();
+        assert!(bucket < 100);
+        let mut item = content("1.2.0", b"pak");
+        item.rollout = Some(bucket + 1);
+        assert!(rollout_allows(&item, &save_dir, "bridge"));
+        item.rollout = Some(bucket);
+        assert!(!rollout_allows(&item, &save_dir, "bridge"));
+        item.rollout = Some(100);
+        assert!(rollout_allows(&item, &save_dir, "bridge"));
+        item.rollout = Some(0);
+        assert!(!rollout_allows(&item, &save_dir, "bridge"));
+        fs::remove_dir_all(save_dir).ok();
+    }
+
+    #[test]
     fn downloads_and_installs_a_signed_update() {
         let pak = b"fresh pak".to_vec();
         let (key, pair) = keypair();
@@ -704,19 +1060,33 @@ mod tests {
         let sig = signature(&pair, &manifest);
         let served = pak.clone();
         let server = std::thread::spawn(move || {
-            for _ in 0..3 {
+            for _ in 0..4 {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
                 let mut request = String::new();
                 reader.read_line(&mut request).unwrap();
+                let mut headers = String::new();
                 loop {
                     let mut line = String::new();
                     reader.read_line(&mut line).unwrap();
                     if line == "\r\n" || line.is_empty() {
                         break;
                     }
+                    headers.push_str(&line);
                 }
                 let path = request.split_whitespace().nth(1).unwrap_or("/");
+                let not_modified = path == "/manifest.json"
+                    && headers
+                        .to_ascii_lowercase()
+                        .contains("if-none-match: \"v1\"");
+                if not_modified {
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 304 Not Modified\r\nETag: \"v1\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        )
+                        .unwrap();
+                    continue;
+                }
                 let body = match path {
                     "/manifest.json" => manifest.clone(),
                     "/manifest.json.sig" => sig.clone().into_bytes(),
@@ -728,8 +1098,13 @@ mod tests {
                 } else {
                     "200 OK"
                 };
+                let etag = if path == "/manifest.json" {
+                    "ETag: \"v1\"\r\n"
+                } else {
+                    ""
+                };
                 let header = format!(
-                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    "HTTP/1.1 {status}\r\n{etag}Content-Length: {}\r\nConnection: close\r\n\r\n",
                     body.len()
                 );
                 stream.write_all(header.as_bytes()).unwrap();
@@ -739,13 +1114,32 @@ mod tests {
         let save_dir = temp_dir("http");
         let settings = UpdateSettings {
             url: format!("{base}/manifest.json"),
-            public_key: key,
+            public_key: Some(key),
+            public_keys: Vec::new(),
         };
-        let version = check(&settings, &save_dir, "bridge", "1.0.0", "0.1.0").unwrap();
+        let state = UpdateState::new(Some("1.0.0".to_string()));
+        let (version, etag) = check(
+            &settings, &save_dir, "bridge", "1.0.0", "0.1.0", None, &state,
+        )
+        .unwrap();
         assert_eq!(version.as_deref(), Some("1.2.0"));
+        assert_eq!(etag.as_deref(), Some("\"v1\""));
+        let (version, _) = check(
+            &settings,
+            &save_dir,
+            "bridge",
+            "1.0.0",
+            "0.1.0",
+            etag.as_deref(),
+            &state,
+        )
+        .unwrap();
+        assert!(version.is_none());
         server.join().unwrap();
-        let state = installed(&save_dir).unwrap();
-        assert_eq!(fs::read(pak_path(&save_dir, &state)).unwrap(), pak);
+        let snapshot: serde_json::Value = serde_json::from_str(&state.snapshot_json()).unwrap();
+        assert_eq!(snapshot["status"], "up-to-date");
+        let installed = installed(&save_dir).unwrap();
+        assert_eq!(fs::read(pak_path(&save_dir, &installed)).unwrap(), pak);
         fs::remove_dir_all(save_dir).ok();
     }
 }

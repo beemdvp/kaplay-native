@@ -72,6 +72,9 @@ test("manifest signs the exact manifest bytes", (t) => {
             "signing.pem",
             "--min-host",
             "0.1.0",
+            "--rollout",
+            "25",
+            "--required",
             "--out",
             "dist",
         ],
@@ -86,6 +89,8 @@ test("manifest signs the exact manifest bytes", (t) => {
     assert.equal(manifest.content.minHost, "0.1.0");
     assert.equal(manifest.content.sha256, createHash("sha256").update(pak).digest("hex"));
     assert.equal(manifest.content.size, pak.length);
+    assert.equal(manifest.content.rollout, 25);
+    assert.equal(manifest.content.required, true);
     const signature = Buffer.from(
         readFileSync(join(dir, "dist", "manifest.json.sig"), "utf8").trim(),
         "base64",
@@ -128,6 +133,48 @@ test("pack embeds the update settings", (t) => {
     assert.equal(
         config.update.publicKey,
         readFileSync(join(dir, "signing.pem.pub"), "utf8").trim(),
+    );
+});
+
+test("pack trusts multiple update keys", (t) => {
+    const dir = workspace(t);
+    writeFileSync(join(dir, "game.pak"), "pak contents");
+    writeFileSync(join(dir, "host"), "host bytes");
+    assert.equal(run(["keygen", "--out", "first.pem"], dir).status, 0);
+    assert.equal(run(["keygen", "--out", "second.pem"], dir).status, 0);
+    const output = process.platform === "win32" ? "packed.exe" : "packed";
+    const result = run(
+        [
+            "pack",
+            "--pak",
+            "game.pak",
+            "--host",
+            "host",
+            "--out",
+            "packed",
+            "--game-id",
+            "bridge",
+            "--content-version",
+            "1.2.0",
+            "--update-url",
+            "https://cdn.example.com/stable/manifest.json",
+            "--update-key",
+            "first.pem.pub",
+            "--update-key",
+            "second.pem.pub",
+        ],
+        dir,
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const config = readTrailerConfig(join(dir, output));
+    assert.equal(config.update.publicKeys.length, 2);
+    assert.equal(
+        config.update.publicKeys[0],
+        readFileSync(join(dir, "first.pem.pub"), "utf8").trim(),
+    );
+    assert.equal(
+        config.update.publicKeys[1],
+        readFileSync(join(dir, "second.pem.pub"), "utf8").trim(),
     );
 });
 
@@ -174,4 +221,29 @@ test("manifest rejects a non-semver version", (t) => {
     );
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /semver/);
+});
+
+test("manifest rejects an invalid rollout", (t) => {
+    const dir = workspace(t);
+    writeFileSync(join(dir, "game.pak"), "pak contents");
+    assert.equal(run(["keygen", "--out", "signing.pem"], dir).status, 0);
+    const result = run(
+        [
+            "manifest",
+            "game.pak",
+            "--version",
+            "1.2.0",
+            "--url",
+            "https://cdn.example.com/game.pak",
+            "--game-id",
+            "bridge",
+            "--key",
+            "signing.pem",
+            "--rollout",
+            "101",
+        ],
+        dir,
+    );
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /rollout/);
 });

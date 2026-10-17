@@ -59,6 +59,7 @@ pub struct HostState {
     pub auth: RefCell<Option<crate::auth::AuthServer>>,
     pub game_name: String,
     pub steam: Rc<RefCell<Option<SteamApi>>>,
+    pub updates: Arc<crate::updates::UpdateState>,
 }
 
 impl HostState {

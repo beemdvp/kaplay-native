@@ -109,13 +109,15 @@ Content update options:
   --game-id <id>        Stable id for saves and updates
   --content-version <v> Version of the packaged content (semver)
   --update-url <url>    Manifest URL checked on launch
-  --update-key <key>    Ed25519 public key (base64 or a file)
+  --update-key <key>    Ed25519 public key (repeatable, base64 or a file)
 
 Manifest options:
   --version <v>     Content version (semver)
   --url <url>       Download URL for the pak
   --key <file>      Ed25519 private key from keygen
   --min-host <v>    Minimum host version required by the content
+  --rollout <n>     Percentage of installs that receive the content (0-100)
+  --required        Mark the update as required by the game
   --out <path>      Output directory or manifest.json path
 `);
 }
@@ -130,10 +132,13 @@ function parseArgs(argv) {
         }
         const key = arg.slice(2);
         const next = argv[i + 1];
-        const takesValue = !["headless", "fullscreen", "allow-network", "no-audio", "no-vsync", "stats", "x11", "help", "update", "no-update", "reset-content", "force"].includes(key);
+        const takesValue = !["headless", "fullscreen", "allow-network", "no-audio", "no-vsync", "stats", "x11", "help", "update", "no-update", "reset-content", "force", "required"].includes(key);
         if (takesValue && next !== undefined && !next.startsWith("--")) {
             if (key === "preload") options.preload.push(next);
-            else options[key] = next;
+            else if (key === "update-key") {
+                if (!Array.isArray(options["update-key"])) options["update-key"] = [];
+                options["update-key"].push(next);
+            } else options[key] = next;
             i++;
         } else {
             options[key] = true;
@@ -172,6 +177,15 @@ function requireGameId(value) {
     return value;
 }
 
+function requireRollout(value) {
+    if (value === true) fail("missing --rollout value");
+    const rollout = Number(value);
+    if (!Number.isInteger(rollout) || rollout < 0 || rollout > 100) {
+        fail(`--rollout must be an integer from 0 to 100, got ${value}`);
+    }
+    return rollout;
+}
+
 function requireHttpUrl(value, label) {
     let url;
     try {
@@ -194,6 +208,7 @@ function slugify(value) {
 }
 
 function readPublicKey(value) {
+    if (typeof value !== "string") fail("missing --update-key value");
     const file = resolve(value);
     const text = existsSync(file) && statSync(file).isFile() ? readFileSync(file, "utf8") : value;
     const raw = Buffer.from(text.trim(), "base64");
@@ -463,8 +478,13 @@ async function packCommand(options) {
     const updateUrl = options["update-url"]
         ? requireHttpUrl(options["update-url"], "--update-url")
         : null;
-    const updateKey = options["update-key"] ? readPublicKey(options["update-key"]) : null;
-    if (Boolean(updateUrl) !== Boolean(updateKey)) {
+    const updateKeys = options["update-key"]
+        ? (Array.isArray(options["update-key"])
+              ? options["update-key"]
+              : [options["update-key"]]
+          ).map(readPublicKey)
+        : [];
+    if (Boolean(updateUrl) !== (updateKeys.length > 0)) {
         fail("--update-url and --update-key must be used together");
     }
     if (updateUrl && (!gameId || !contentVersion)) {
@@ -478,7 +498,16 @@ async function packCommand(options) {
     if (options.url) config.url = options.url;
     if (gameId) config.gameId = gameId;
     if (contentVersion) config.contentVersion = contentVersion;
-    if (updateUrl) config.update = { url: updateUrl, publicKey: updateKey };
+    if (updateUrl) {
+        config.update =
+            updateKeys.length === 1
+                ? { url: updateUrl, publicKey: updateKeys[0] }
+                : {
+                      url: updateUrl,
+                      publicKey: updateKeys[0],
+                      publicKeys: updateKeys,
+                  };
+    }
     const configBytes = Buffer.from(JSON.stringify(config), "utf8");
     const trailer = Buffer.alloc(24);
     trailer.write(TRAILER_MAGIC, 0, "ascii");
@@ -577,6 +606,7 @@ function manifestCommand(options) {
     const minHost = options["min-host"]
         ? requireSemver(options["min-host"], "--min-host")
         : null;
+    const rollout = options.rollout !== undefined ? requireRollout(options.rollout) : null;
     const pak = readFileSync(pakPath);
     if (pak.length === 0) fail(`pak archive is empty: ${pakPath}`);
     const sha256 = createHash("sha256").update(pak).digest("hex");
@@ -589,6 +619,8 @@ function manifestCommand(options) {
             url,
             sha256,
             size: pak.length,
+            ...(rollout !== null ? { rollout } : {}),
+            ...(options.required ? { required: true } : {}),
         },
     };
     const bytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, "utf8");
