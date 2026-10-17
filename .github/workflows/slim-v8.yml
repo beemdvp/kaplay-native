@@ -83,10 +83,20 @@ jobs:
         run: |
           set -euo pipefail
           version=${{ steps.recipe.outputs.version }}
+          tag=slim-v8-$version
           asset=librusty_v8_slim_${version}_${{ matrix.target }}${{ matrix.lib_ext }}
-          notes=$(gh release view "slim-v8-$version" --json body -q .body 2>/dev/null || true)
+          lookup() {
+            if out=$(gh release view "$tag" "$@" 2>&1); then
+              printf '%s\n' "$out"
+            elif ! printf '%s' "$out" | grep -qi "not found"; then
+              printf 'could not read the %s release: %s\n' "$tag" "$out" >&2
+              exit 1
+            fi
+          }
+          notes=$(lookup --json body -q .body)
+          assets=$(lookup --json assets -q '.assets[].name')
           if printf '%s' "$notes" | grep -qF "config=${{ steps.recipe.outputs.config }}" &&
-            gh release view "slim-v8-$version" --json assets -q '.assets[].name' 2>/dev/null | grep -qxF "$asset"; then
+            printf '%s\n' "$assets" | grep -qxF "$asset"; then
             echo "$asset is already published for ${{ steps.recipe.outputs.config }}" >> "$GITHUB_STEP_SUMMARY"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
