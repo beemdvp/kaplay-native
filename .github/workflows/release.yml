@@ -43,6 +43,7 @@ jobs:
             asset: kaplay-native-host-linux-x64
             asset_v8: kaplay-native-host-linux-x64-v8
             ext: ""
+            lib_ext: ".a"
             native: true
           - name: linux-arm64
             os: ubuntu-24.04-arm
@@ -50,6 +51,7 @@ jobs:
             asset: kaplay-native-host-linux-arm64
             asset_v8: kaplay-native-host-linux-arm64-v8
             ext: ""
+            lib_ext: ".a"
             native: true
           - name: macos-arm64
             os: macos-latest
@@ -57,6 +59,7 @@ jobs:
             asset: kaplay-native-host-macos-arm64
             asset_v8: kaplay-native-host-macos-arm64-v8
             ext: ""
+            lib_ext: ".a"
             native: true
           - name: macos-x64
             os: macos-latest
@@ -64,6 +67,7 @@ jobs:
             asset: kaplay-native-host-macos-x64
             asset_v8: kaplay-native-host-macos-x64-v8
             ext: ""
+            lib_ext: ".a"
             native: false
           - name: windows-x64
             os: windows-latest
@@ -71,6 +75,7 @@ jobs:
             asset: kaplay-native-host-windows-x64.exe
             asset_v8: kaplay-native-host-windows-x64-v8.exe
             ext: ".exe"
+            lib_ext: ".lib"
             native: true
     steps:
       - uses: actions/checkout@v4
@@ -102,14 +107,13 @@ jobs:
         shell: bash
         run: cp "target/${{ matrix.target }}/release/kaplay-native-host${{ matrix.ext }}" "${{ matrix.asset }}"
       - name: Use the slim V8 archive when published
-        if: runner.os == 'Linux'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           version=$(sed -n '/^name = "v8"$/{n;s/^version = "\(.*\)"$/\1/p;q}' Cargo.lock)
-          asset=librusty_v8_slim_${version}_${{ matrix.target }}.a
+          asset=librusty_v8_slim_${version}_${{ matrix.target }}${{ matrix.lib_ext }}
           if gh release download "slim-v8-$version" -p "$asset" -D "$RUNNER_TEMP/slim-v8" --clobber 2>/dev/null; then
             echo "RUSTY_V8_ARCHIVE=$RUNNER_TEMP/slim-v8/$asset" >> "$GITHUB_ENV"
             echo "The v8 host uses the slim $version archive" >> "$GITHUB_STEP_SUMMARY"
