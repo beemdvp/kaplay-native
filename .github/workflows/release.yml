@@ -189,4 +189,4 @@ jobs:
             echo "NPM_TOKEN is not set; skipping npm publish"
             exit 0
           fi
-          (cd cli && npm publish --access public)
+          (cd cli && npm publish --access public --tag latest)
