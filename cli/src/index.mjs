@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
+import { createHash, createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
 import {
     chmodSync,
     copyFileSync,
@@ -25,6 +26,8 @@ const GITHUB_REPO = "beemdvp/kaplay-native";
 const hostName = process.platform === "win32" ? "kaplay-native-host.exe" : "kaplay-native-host";
 const TRAILER_MAGIC = "KNATIVEP";
 const TRAILER_VERSION = 1;
+const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const GAME_ID = /^[A-Za-z0-9._-]{1,96}$/;
 
 function platformTag() {
     const tags = {
@@ -68,6 +71,8 @@ Commands:
   build [dir]       Bundle a game and pack it into a .pak
   pack [dir]        Build a game into a single-file executable for this platform
   test [dir]        Run a game headlessly and compare a screenshot
+  keygen            Generate an Ed25519 key pair for content updates
+  manifest <pak>    Write a signed content manifest for a .pak
   engines           Print the compiled-in javascript engines
   doctor            Check the local toolchain
 
@@ -97,6 +102,21 @@ Common options:
   --url <url>       Page URL games see as window.location (resolves relative requests)
   --js-engine <n>   Javascript engine to run or embed (quickjs or v8)
   --x11             Prefer the X11 backend on Linux
+  --no-update       Skip the content update check
+  --reset-content   Delete installed content updates before starting
+
+Content update options:
+  --game-id <id>        Stable id for saves and updates
+  --content-version <v> Version of the packaged content (semver)
+  --update-url <url>    Manifest URL checked on launch
+  --update-key <key>    Ed25519 public key (base64 or a file)
+
+Manifest options:
+  --version <v>     Content version (semver)
+  --url <url>       Download URL for the pak
+  --key <file>      Ed25519 private key from keygen
+  --min-host <v>    Minimum host version required by the content
+  --out <path>      Output directory or manifest.json path
 `);
 }
 
@@ -110,7 +130,7 @@ function parseArgs(argv) {
         }
         const key = arg.slice(2);
         const next = argv[i + 1];
-        const takesValue = !["headless", "fullscreen", "allow-network", "no-audio", "no-vsync", "stats", "x11", "help", "update"].includes(key);
+        const takesValue = !["headless", "fullscreen", "allow-network", "no-audio", "no-vsync", "stats", "x11", "help", "update", "no-update", "reset-content", "force"].includes(key);
         if (takesValue && next !== undefined && !next.startsWith("--")) {
             if (key === "preload") options.preload.push(next);
             else options[key] = next;
@@ -127,6 +147,60 @@ function which(binary) {
         encoding: "utf8",
     });
     return result.status === 0 ? binary : null;
+}
+
+function fail(message) {
+    console.error(message);
+    process.exit(1);
+}
+
+function requireValue(options, key, label) {
+    const value = options[key];
+    if (!value || value === true) fail(`missing ${label}`);
+    return value;
+}
+
+function requireSemver(value, label) {
+    if (!SEMVER.test(value)) fail(`${label} must be a semver version, got ${value}`);
+    return value;
+}
+
+function requireGameId(value) {
+    if (!GAME_ID.test(value) || value === "." || value === "..") {
+        fail(`game id must match ${GAME_ID.source}, got ${value}`);
+    }
+    return value;
+}
+
+function requireHttpUrl(value, label) {
+    let url;
+    try {
+        url = new URL(value);
+    } catch {
+        fail(`${label} must be a URL, got ${value}`);
+    }
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+        fail(`${label} must be an http(s) URL, got ${value}`);
+    }
+    return value;
+}
+
+function slugify(value) {
+    return value
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/g, "-")
+        .replace(/^[.-]+|[.-]+$/g, "")
+        .slice(0, 96);
+}
+
+function readPublicKey(value) {
+    const file = resolve(value);
+    const text = existsSync(file) && statSync(file).isFile() ? readFileSync(file, "utf8") : value;
+    const raw = Buffer.from(text.trim(), "base64");
+    if (raw.length !== 32) {
+        fail(`update key must be a 32-byte Ed25519 public key in base64: ${value}`);
+    }
+    return raw.toString("base64");
 }
 
 async function downloadHost(engine) {
@@ -213,6 +287,8 @@ function hostArgs(options, extra = {}) {
     if (options.url) args.push("--url", options.url);
     if (options["js-engine"]) args.push("--js-engine", options["js-engine"]);
     if (options.x11) args.push("--x11");
+    if (options["no-update"]) args.push("--no-update");
+    if (options["reset-content"]) args.push("--reset-content");
     return args;
 }
 
@@ -376,12 +452,33 @@ async function packCommand(options) {
     const base = options.out ? resolve(options.out) : join(dir ?? process.cwd(), "dist", `${name}-${tag}`);
     const out = process.platform === "win32" && !base.endsWith(".exe") ? `${base}.exe` : base;
     mkdirSync(dirname(out), { recursive: true });
+    const gameId = options["game-id"]
+        ? requireGameId(options["game-id"])
+        : options.title
+          ? slugify(options.title) || null
+          : null;
+    const contentVersion = options["content-version"]
+        ? requireSemver(options["content-version"], "--content-version")
+        : null;
+    const updateUrl = options["update-url"]
+        ? requireHttpUrl(options["update-url"], "--update-url")
+        : null;
+    const updateKey = options["update-key"] ? readPublicKey(options["update-key"]) : null;
+    if (Boolean(updateUrl) !== Boolean(updateKey)) {
+        fail("--update-url and --update-key must be used together");
+    }
+    if (updateUrl && (!gameId || !contentVersion)) {
+        fail("--update-url also needs --game-id and --content-version");
+    }
     const config = {};
     if (options["js-engine"]) config.jsEngine = options["js-engine"];
     if (options.title) config.title = options.title;
     if (options.window) config.window = options.window;
     if (options["allow-network"]) config.network = true;
     if (options.url) config.url = options.url;
+    if (gameId) config.gameId = gameId;
+    if (contentVersion) config.contentVersion = contentVersion;
+    if (updateUrl) config.update = { url: updateUrl, publicKey: updateKey };
     const configBytes = Buffer.from(JSON.stringify(config), "utf8");
     const trailer = Buffer.alloc(24);
     trailer.write(TRAILER_MAGIC, 0, "ascii");
@@ -449,6 +546,71 @@ async function doctorCommand(options) {
     }
 }
 
+function keygenCommand(options) {
+    const out = options.out ? resolve(options.out) : resolve("update-key.pem");
+    if (existsSync(out) && !options.force) {
+        fail(`${out} already exists; pass --force to overwrite it`);
+    }
+    mkdirSync(dirname(out), { recursive: true });
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const privatePem = privateKey.export({ type: "pkcs8", format: "pem" });
+    const spki = publicKey.export({ type: "spki", format: "der" });
+    const raw = spki.subarray(spki.length - 32);
+    const publicText = raw.toString("base64");
+    const pubPath = `${out}.pub`;
+    writeFileSync(out, privatePem, { mode: 0o600 });
+    writeFileSync(pubPath, `${publicText}\n`);
+    console.log(`private key ${out} (keep it secret)`);
+    console.log(`public key  ${pubPath} ${publicText}`);
+}
+
+function manifestCommand(options) {
+    const pakPath = options._[0] ? resolve(options._[0]) : null;
+    if (!pakPath || !existsSync(pakPath) || !statSync(pakPath).isFile()) {
+        fail(`pak archive not found: ${pakPath ?? "(missing)"}`);
+    }
+    const version = requireSemver(requireValue(options, "version", "--version"), "--version");
+    const url = requireHttpUrl(requireValue(options, "url", "--url"), "--url");
+    const gameId = requireGameId(requireValue(options, "game-id", "--game-id"));
+    const keyPath = resolve(requireValue(options, "key", "--key"));
+    if (!existsSync(keyPath) || !statSync(keyPath).isFile()) fail(`private key not found: ${keyPath}`);
+    const minHost = options["min-host"]
+        ? requireSemver(options["min-host"], "--min-host")
+        : null;
+    const pak = readFileSync(pakPath);
+    if (pak.length === 0) fail(`pak archive is empty: ${pakPath}`);
+    const sha256 = createHash("sha256").update(pak).digest("hex");
+    const manifest = {
+        format: 1,
+        gameId,
+        content: {
+            version,
+            ...(minHost ? { minHost } : {}),
+            url,
+            sha256,
+            size: pak.length,
+        },
+    };
+    const bytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    let privateKey;
+    try {
+        privateKey = createPrivateKey(readFileSync(keyPath));
+    } catch (error) {
+        fail(`could not read private key ${keyPath}: ${error.message}`);
+    }
+    if (privateKey.asymmetricKeyType !== "ed25519") {
+        fail(`private key ${keyPath} is not an Ed25519 key`);
+    }
+    const signature = sign(null, bytes, privateKey);
+    const target = options.out ? resolve(options.out) : dirname(pakPath);
+    const manifestPath = target.endsWith(".json") ? target : join(target, "manifest.json");
+    mkdirSync(dirname(manifestPath), { recursive: true });
+    writeFileSync(manifestPath, bytes);
+    writeFileSync(`${manifestPath}.sig`, `${signature.toString("base64")}\n`);
+    console.log(`content ${version} sha256 ${sha256} (${pak.length} bytes)`);
+    console.log(`wrote ${manifestPath} and ${manifestPath}.sig`);
+}
+
 async function enginesCommand(options) {
     const host = await requireHost(options.host, options["js-engine"]);
     const result = spawnSync(host, ["--engines"], { encoding: "utf8" });
@@ -482,6 +644,12 @@ switch (command) {
         break;
     case "test":
         await testCommand(options);
+        break;
+    case "keygen":
+        keygenCommand(options);
+        break;
+    case "manifest":
+        manifestCommand(options);
         break;
     case "engines":
         await enginesCommand(options);

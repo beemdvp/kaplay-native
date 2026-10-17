@@ -121,7 +121,9 @@ The same command is available from the published npm CLI, which downloads the
 matching host binary on first use, and a GitHub Actions workflow can produce
 artifacts for Linux, Windows, and macOS in one matrix. Builds, run-time
 overrides, the packed format, and a copy-paste release workflow are documented
-in [docs/distribution.md](docs/distribution.md).
+in [docs/distribution.md](docs/distribution.md). Signed content updates, which
+let a packed game replace its assets and scripts on the next launch without
+replacing the executable, are documented in [docs/updates.md](docs/updates.md).
 
 ## Running a web build
 

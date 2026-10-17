@@ -1416,6 +1416,7 @@ name = "kaplay-native-host"
 version = "0.1.0-alpha.8"
 dependencies = [
  "anyhow",
+ "base64",
  "clap",
  "dirs",
  "env_logger",
@@ -1432,9 +1433,13 @@ dependencies = [
  "kaplay-native-video",
  "log",
  "png",
+ "ring",
  "rquickjs",
+ "rustls",
+ "semver",
  "serde",
  "serde_json",
+ "ureq",
  "v8",
  "winit",
  "zip",
