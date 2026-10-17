@@ -507,6 +507,16 @@ fn gl_version(display: &impl GlDisplay) -> Option<(u32, u32)> {
     Some((major, minor))
 }
 
+fn relaunch() -> std::io::Result<()> {
+    let exe = std::env::current_exe()?;
+    let args: Vec<std::ffi::OsString> = std::env::args_os()
+        .skip(1)
+        .filter(|arg| arg.to_str() != Some("--reset-content"))
+        .collect();
+    std::process::Command::new(exe).args(args).spawn()?;
+    Ok(())
+}
+
 impl HostApp {
     pub fn new(config: HostConfig, assets: Rc<AssetSource>) -> anyhow::Result<Self> {
         let steam = if config.steam { SteamApi::load() } else { None };
@@ -563,6 +573,15 @@ impl HostApp {
         result?;
         if self.failed {
             anyhow::bail!("failed to create a window with an OpenGL 2.1 context");
+        }
+        let restart = self
+            .inner
+            .as_ref()
+            .is_some_and(|inner| inner.state.updates.restart_requested());
+        if restart {
+            if let Err(error) = relaunch() {
+                log::error!("failed to relaunch for the content update: {error}");
+            }
         }
         Ok(())
     }
@@ -691,6 +710,7 @@ impl HostApp {
             auth: std::cell::RefCell::new(None),
             game_name: self.config.game_name.clone(),
             steam: self.steam.clone(),
+            updates: self.config.updates.clone(),
         });
 
         if self.config.fullscreen {
@@ -921,8 +941,9 @@ impl HostApp {
         let Some(inner) = self.inner.as_ref() else {
             return;
         };
-        let finished =
-            inner.state.quit.get() || self.config.frames.is_some_and(|limit| self.frames >= limit);
+        let finished = inner.state.quit.get()
+            || inner.state.updates.restart_requested()
+            || self.config.frames.is_some_and(|limit| self.frames >= limit);
         if finished {
             if let Some(path) = self.config.screenshot.clone() {
                 self.capture_screenshot(&path);

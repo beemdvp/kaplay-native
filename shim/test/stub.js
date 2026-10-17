@@ -316,6 +316,20 @@ export function installStub() {
                 return buffer ? buffer.frames / buffer.sampleRate : -1;
             },
         },
+        updates: {
+            snapshot: () =>
+                JSON.stringify({
+                    status: "ready",
+                    current: "1.0.0",
+                    version: "1.1.0",
+                    required: true,
+                    progress: 100,
+                }),
+            apply: () => {
+                record("updates.apply", []);
+                return true;
+            },
+        },
         steam: {
             available: () => true,
             playerName: () => "Tester",

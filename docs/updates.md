@@ -41,6 +41,11 @@ into place. The next launch picks it up. The previous `.pak` is kept so manual
 rollback is possible. `--reset-content` deletes installed content and runs the
 embedded one for that launch; add `--no-update` to keep it there.
 
+Manifests are fetched with `If-None-Match`, so a feed that has not changed
+returns `304` and the host skips the signature download. Checks are throttled
+to once every six hours per game, and a failed check does not clear the
+installed content.
+
 ## Create a signing key
 
 Updates are signed so a compromised CDN cannot ship new game code. Generate the
@@ -122,6 +127,7 @@ The manifest is a small JSON file:
 }
 ```
 
+`rollout` and `required` are optional and are written by the matching flags.
 The signature covers the exact bytes of `manifest.json`. The host fetches
 `<manifest-url>.sig`; when the manifest URL has a query string, `.sig` is
 inserted before the `?`.
@@ -143,6 +149,80 @@ Keep the feed served over HTTPS in production. The signature already protects
 the payload from tampering, but HTTPS also keeps the game id and version
 private. Serve `manifest.json` with a short cache lifetime and the versioned
 `.pak` with a long immutable cache.
+
+## Status and restart
+
+The game can read the updater state from `kaplayNative.updates`:
+
+```js
+const update = kaplayNative.updates.status();
+
+if (update.status === "ready") {
+    kaplayNative.updates.apply();
+}
+```
+
+`status` is one of `idle`, `checking`, `up-to-date`, `downloading`, `ready`, or
+`error`. The object also carries `current`, `version`, `required`, `progress`,
+and `error`. `current` is the content version that is running, `version` is the
+version the updater is checking or has installed, and `progress` is 0-100 while
+downloading. `apply()` returns `false` unless an update is ready; when it
+returns `true` the host starts a new process with the same arguments and exits,
+so call it only when losing unsaved state is safe.
+
+## Required updates
+
+Pass `--required` when generating the manifest to mark an update as required:
+
+```sh
+kaplay-native manifest dist/game.pak --version 1.4.3   --url https://cdn.example.com/my-game/1.4.3/game.pak   --game-id my-game --required --key update-key.pem --out dist/manifest
+```
+
+The flag is exposed as `required` in the status object. The game should block
+new play (or the menu) while `status === "ready"` and `required` is true, then
+call `apply()`. The host does not interrupt the running game on its own. For
+online games, reject old content versions on the server as well; a client can
+always quit instead of updating.
+
+## Staged rollout
+
+`--rollout` limits an update to a percentage of installs:
+
+```sh
+kaplay-native manifest dist/game.pak --version 1.4.3 --rollout 25 ...
+```
+
+The host derives a stable 0-99 bucket from a random install id stored next to
+the game's save data and the game id, and installs the update when
+`bucket < rollout`. The same install always lands in the same bucket, so
+increasing the rollout expands the audience without reshuffling it.
+`--rollout 0` pauses an update and `--rollout 100` (the default) releases it to
+everyone.
+
+Rollout changes are part of the manifest, so they also change its ETag. Changing
+the rollout means rewriting and re-uploading the signed manifest; the pak is
+unchanged. Hosts that predate `rollout` ignore the field and accept the update
+immediately.
+
+## Key rotation
+
+`--update-key` can be passed more than once, and the host trusts any key in the
+pack's `publicKey` / `publicKeys` config:
+
+```sh
+kaplay-native pack ./my-game --out dist/my-game \
+  --game-id my-game --content-version 1.4.3 \
+  --update-url https://cdn.example.com/my-game/stable/manifest.json \
+  --update-key update-key.pem.pub --update-key next-key.pem.pub
+```
+
+Sign with either private key while both are trusted. To rotate, first ship a
+build that trusts the current and next keys, then start signing with the next
+key. Old executables cannot learn a key they were never packed with; adding a
+key to future content manifests is not enough.
+
+If a beta key must not be able to sign stable content, pack the stable build
+with only the stable key; a build trusts every key baked into it.
 
 ## Save data
 
@@ -191,5 +271,8 @@ direct downloads.
 - There is no automatic crash rollback in this version. If new content is
   broken, `--reset-content` returns to the embedded content; the previous `.pak`
   remains in the update directory for manual recovery.
-- Content is downloaded and applied on the next launch, not hot-swapped during
-  play.
+- Content is downloaded and applied on the next launch, or through
+  `kaplayNative.updates.apply()`, not hot-swapped during play.
+- Deltas, telemetry, and resumable downloads are not implemented. Content packs
+  are usually small; if a release becomes bandwidth-bound, a file-level delta is
+  the next step rather than adding a native patching dependency.

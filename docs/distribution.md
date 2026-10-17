@@ -99,7 +99,7 @@ The trailer is little-endian:
 
 The config is a JSON object; every key is optional: `jsEngine`, `title`,
 `window`, `network`, `url`, `gameId`, `contentVersion`, and `update`
-(`url` plus `publicKey`). Explicit command-line flags win over the config,
+(`url` plus `publicKey` or `publicKeys`). Explicit command-line flags win over the config,
 which wins over the host defaults. A `--pak` or `--dir` argument also
 overrides both the embedded and the installed archive, which is useful for
 testing a new build against an existing binary.
@@ -124,7 +124,9 @@ Pack with `--game-id`, `--content-version`, `--update-url`, and `--update-key`,
 publish a signed manifest, and players pick up new content on their next launch.
 Updates are skipped for Steam launches, headless runs, and explicit `--pak` or
 `--dir` runs. `--reset-content` returns a player to the content embedded in the
-executable, and `--no-update` disables the check. The full workflow is in
+executable, and `--no-update` disables the check. Games can read
+`kaplayNative.updates.status()` and call `kaplayNative.updates.apply()` to
+restart into a downloaded update. The full workflow is in
 [updates.md](updates.md).
 
 ## Game CI

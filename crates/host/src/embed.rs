@@ -117,7 +117,7 @@ mod tests {
         assert_eq!(embedded.config.content_version.as_deref(), Some("1.2.0"));
         let update = embedded.config.update.unwrap();
         assert_eq!(update.url, "https://cdn.example.com/manifest.json");
-        assert_eq!(update.public_key, "a2V5");
+        assert_eq!(update.public_key.as_deref(), Some("a2V5"));
         std::fs::remove_file(&path).ok();
     }
 

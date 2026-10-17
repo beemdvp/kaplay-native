@@ -197,6 +197,8 @@
     record("steam.unlock", native.steam.unlockAchievement("BRIDGE"));
     record("steam.achievement", native.steam.isAchievementUnlocked("BRIDGE"));
     record("steam.storeStats", native.steam.storeStats());
+    record("updates.snapshot", JSON.parse(native.updates.snapshot()));
+    record("updates.apply", native.updates.apply());
     record("steam.setStatInt", native.steam.setStatInt("bridge", 1));
     record("steam.getStatInt", native.steam.getStatInt("bridge"));
     record("steam.setStatFloat", native.steam.setStatFloat("bridge", 1.5));

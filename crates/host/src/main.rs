@@ -10,6 +10,7 @@ mod state;
 mod updates;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clap::Parser;
 use kaplay_native_pak::AssetSource;
@@ -190,6 +191,12 @@ fn main() -> anyhow::Result<()> {
         },
     };
 
+    let content_version = installed
+        .as_ref()
+        .map(|content| content.version.clone())
+        .or_else(|| pack.content_version.clone());
+    let update_state = Arc::new(updates::UpdateState::new(content_version.clone()));
+
     if !args.no_update
         && !args.headless
         && args.pak.is_none()
@@ -199,12 +206,16 @@ fn main() -> anyhow::Result<()> {
         && std::env::var_os("SteamAppId").is_none()
     {
         if let (Some(settings), Some(game_id)) = (pack.update.clone(), pack.game_id.clone()) {
-            let current_version = installed
-                .as_ref()
-                .map(|content| content.version.clone())
-                .or_else(|| pack.content_version.clone())
+            let current_version = content_version
+                .clone()
                 .unwrap_or_else(|| "0.0.0".to_string());
-            updates::spawn_check(settings, save_dir.clone(), game_id, current_version);
+            updates::spawn_check(
+                settings,
+                save_dir.clone(),
+                game_id,
+                current_version,
+                Arc::clone(&update_state),
+            );
         }
     }
 
@@ -240,6 +251,7 @@ fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|| "KAPLAY".to_string()),
         url: args.url.or(pack.url),
         js_engine,
+        updates: update_state,
     };
 
     HostApp::new(config, std::rc::Rc::new(source))?.run()

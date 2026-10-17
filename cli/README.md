@@ -19,8 +19,9 @@ GitHub releases on first use and caches it.
 
 Packed games can also update their content without replacing the executable.
 `keygen` creates an Ed25519 key pair, `pack --update-url --update-key` embeds the
-feed and public key, and `manifest` signs the published `.pak`. The full
-workflow is in
+feed and public key, and `manifest` signs the published `.pak`. Games can poll
+`kaplayNative.updates.status()` and restart into an update with
+`kaplayNative.updates.apply()`. The full workflow is in
 [docs/updates.md](https://github.com/beemdvp/kaplay-native/blob/main/docs/updates.md).
 
 The full documentation, including the packed format and a copy-paste GitHub

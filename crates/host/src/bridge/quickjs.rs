@@ -44,6 +44,7 @@ pub fn install<'js>(ctx: &Ctx<'js>, state: Rc<HostState>, shim: &str) -> rquickj
     install_audio(ctx, &native, &state)?;
     install_video(ctx, &native, &state)?;
     install_steam(ctx, &native, &state)?;
+    install_updates(ctx, &native, &state)?;
     ctx.globals().set("__kapNative", native)?;
     ctx.eval::<(), _>(shim)?;
     Ok(())
@@ -1357,6 +1358,30 @@ fn install_steam<'js>(
         )?;
     }
     native.set("steam", object)?;
+    Ok(())
+}
+
+fn install_updates<'js>(
+    ctx: &Ctx<'js>,
+    native: &Object<'js>,
+    state: &Rc<HostState>,
+) -> rquickjs::Result<()> {
+    let object = Object::new(ctx.clone())?;
+    {
+        let state = state.clone();
+        object.set(
+            "snapshot",
+            Function::new(ctx.clone(), move || state.updates.snapshot_json())?,
+        )?;
+    }
+    {
+        let state = state.clone();
+        object.set(
+            "apply",
+            Function::new(ctx.clone(), move || state.updates.request_restart())?,
+        )?;
+    }
+    native.set("updates", object)?;
     Ok(())
 }
 

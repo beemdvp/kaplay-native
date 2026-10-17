@@ -4393,10 +4393,21 @@
         runCallbacks: () => native.steam.runCallbacks(),
     };
 
+    const updates = native.updates
+        ? {
+              status: () => JSON.parse(native.updates.snapshot()),
+              apply: () => native.updates.apply(),
+          }
+        : {
+              status: () => ({ status: "idle", required: false, progress: 0 }),
+              apply: () => false,
+          };
+
     const kaplayNative = {
         version: native.env.hostVersion,
         platform: native.env.platform,
         steam,
+        updates,
     };
 
     // ------------------------------------------------- system browser hand-off

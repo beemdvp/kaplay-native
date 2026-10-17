@@ -1,6 +1,8 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::js::JsEngine;
+use crate::updates::UpdateState;
 
 #[derive(Debug, Clone)]
 pub struct HostConfig {
@@ -26,4 +28,5 @@ pub struct HostConfig {
     pub game_name: String,
     pub url: Option<String>,
     pub js_engine: JsEngine,
+    pub updates: Arc<UpdateState>,
 }

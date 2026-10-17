@@ -401,6 +401,17 @@ test("the platform namespace exposes steam", () => {
     assert.ok(stub.calls.some((entry) => entry.name === "steam.setStatInt" && entry.args[1] === 3));
 });
 
+test("the platform namespace exposes updates", () => {
+    const status = kaplayNative.updates.status();
+    assert.equal(status.status, "ready");
+    assert.equal(status.current, "1.0.0");
+    assert.equal(status.version, "1.1.0");
+    assert.equal(status.required, true);
+    assert.equal(status.progress, 100);
+    assert.equal(kaplayNative.updates.apply(), true);
+    assert.ok(stub.calls.some((entry) => entry.name === "updates.apply"));
+});
+
 test("url and search params follow the web api", () => {
     const parsed = new URL("/colyseus?x=1&y=a+b", "ws://127.0.0.1:2567");
     assert.equal(parsed.protocol, "ws:");
