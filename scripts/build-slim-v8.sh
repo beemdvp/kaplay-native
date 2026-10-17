@@ -54,11 +54,15 @@ if [ "$HOST_OS" != linux ]; then
     fi
     ICU_SRC=$V8_DIR/third_party/icu/source
     if [ "$HOST_OS" = windows ]; then
-        ICU_PATH="$(cygpath -w "$ICU_SRC/common");$(cygpath -w "$ICU_SRC/i18n")"
-        export CPATH="$ICU_PATH"
-        export INCLUDE="$ICU_PATH${INCLUDE:+;$INCLUDE}"
+        # Never set INCLUDE here: clang's MSVC toolchain returns early when it
+        # is set, which hides the Visual Studio and Windows SDK headers.
+        ICU_COMMON=$(cygpath -m "$ICU_SRC/common")
+        ICU_I18N=$(cygpath -m "$ICU_SRC/i18n")
+        export CPATH="$ICU_COMMON;$ICU_I18N${CPATH:+;$CPATH}"
+        export BINDGEN_EXTRA_CLANG_ARGS="-I$ICU_COMMON -I$ICU_I18N"
     else
         export CPATH="$ICU_SRC/common:$ICU_SRC/i18n${CPATH:+:$CPATH}"
+        export BINDGEN_EXTRA_CLANG_ARGS="-I$ICU_SRC/common -I$ICU_SRC/i18n"
     fi
     echo "ICU headers for binding.cc: $ICU_SRC"
 fi
