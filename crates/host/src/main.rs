@@ -7,6 +7,7 @@ mod js;
 mod keys;
 mod screenshots;
 mod state;
+mod updates;
 
 use std::path::PathBuf;
 
@@ -64,6 +65,10 @@ struct Args {
     url: Option<String>,
     #[arg(long, help = "Disable Steam integration")]
     no_steam: bool,
+    #[arg(long, help = "Delete installed content updates before starting")]
+    reset_content: bool,
+    #[arg(long, help = "Skip the content update check")]
+    no_update: bool,
     #[arg(long, help = "Run without audio output")]
     no_audio: bool,
     #[arg(long, help = "Disable vertical sync (uncapped frame rate)")]
@@ -91,6 +96,21 @@ fn parse_size(value: &str) -> (u32, u32) {
         .and_then(|part| part.trim().parse().ok())
         .unwrap_or(540);
     (width, height)
+}
+
+fn packaged_source(embedded: Option<embed::Embedded>, args: &Args) -> anyhow::Result<AssetSource> {
+    match embedded {
+        Some(entry) => Ok(AssetSource::from_pak_bytes(entry.pak)?),
+        None => {
+            let root = args
+                .script
+                .as_ref()
+                .and_then(|path| path.parent())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."));
+            Ok(AssetSource::from_dir(&root))
+        }
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -123,28 +143,70 @@ fn main() -> anyhow::Result<()> {
         None => js::default_engine(),
     };
 
+    let save_dir = args.save_dir.clone().unwrap_or_else(|| {
+        let root = dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("kaplay-native");
+        match pack.game_id.as_deref().and_then(updates::safe_component) {
+            Some(game_id) => root.join(game_id),
+            None => root,
+        }
+    });
+
+    if args.reset_content {
+        updates::reset(&save_dir);
+    }
+
+    let mut installed =
+        if args.pak.is_none() && args.dir.is_none() && pack.content_version.is_some() {
+            updates::preferred(
+                updates::installed(&save_dir),
+                pack.content_version.as_deref(),
+            )
+        } else {
+            None
+        };
+
     let source = match (&args.pak, &args.dir) {
         (Some(pak), _) => AssetSource::from_pak(pak)?,
         (None, Some(dir)) => AssetSource::from_dir(dir),
-        (None, None) => match embedded.take() {
-            Some(entry) => AssetSource::from_pak_bytes(entry.pak)?,
-            None => {
-                let root = args
-                    .script
-                    .as_ref()
-                    .and_then(|path| path.parent())
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| PathBuf::from("."));
-                AssetSource::from_dir(&root)
-            }
+        (None, None) => match installed.take() {
+            Some(content) => match AssetSource::from_pak(&updates::pak_path(&save_dir, &content)) {
+                Ok(source) => {
+                    log::info!("using installed content {}", content.version);
+                    installed = Some(content);
+                    source
+                }
+                Err(error) => {
+                    log::warn!(
+                        "installed content {} could not be loaded: {error}",
+                        content.version
+                    );
+                    updates::reset(&save_dir);
+                    packaged_source(embedded.take(), &args)?
+                }
+            },
+            None => packaged_source(embedded.take(), &args)?,
         },
     };
 
-    let save_dir = args.save_dir.unwrap_or_else(|| {
-        dirs::data_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("kaplay-native")
-    });
+    if !args.no_update
+        && !args.headless
+        && args.pak.is_none()
+        && args.dir.is_none()
+        && args.appid.is_none()
+        && std::env::var_os("KAPLAY_NATIVE_NO_UPDATE").is_none()
+        && std::env::var_os("SteamAppId").is_none()
+    {
+        if let (Some(settings), Some(game_id)) = (pack.update.clone(), pack.game_id.clone()) {
+            let current_version = installed
+                .as_ref()
+                .map(|content| content.version.clone())
+                .or_else(|| pack.content_version.clone())
+                .unwrap_or_else(|| "0.0.0".to_string());
+            updates::spawn_check(settings, save_dir.clone(), game_id, current_version);
+        }
+    }
 
     let window = args
         .window

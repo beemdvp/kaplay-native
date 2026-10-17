@@ -19,6 +19,7 @@ repository = "https://github.com/beemdvp/kaplay-native"
 
 [workspace.dependencies]
 anyhow = "1"
+base64 = "0.23"
 clap = { version = "4", features = ["derive"] }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 cpal = "0.18"
@@ -48,10 +49,12 @@ symphonia = { version = "0.6", default-features = false, features = [
 tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 ureq = { version = "3", features = ["gzip"] }
 png = "0.18"
+ring = "0.17"
 rusty_h264-common = "0.16"
 rusty_h264-decoder = "0.16"
 rquickjs = { version = "0.14", default-features = false, features = ["std", "array-buffer", "loader"] }
 v8 = { version = "=152.2.0" }
+semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

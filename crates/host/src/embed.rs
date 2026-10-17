@@ -4,6 +4,8 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::updates::UpdateSettings;
+
 pub const MAGIC: &[u8; 8] = b"KNATIVEP";
 pub const VERSION: u32 = 1;
 pub const HEADER_LEN: u64 = 24;
@@ -16,6 +18,9 @@ pub struct PackConfig {
     pub window: Option<String>,
     pub network: Option<bool>,
     pub url: Option<String>,
+    pub game_id: Option<String>,
+    pub content_version: Option<String>,
+    pub update: Option<UpdateSettings>,
 }
 
 pub struct Embedded {
@@ -96,6 +101,23 @@ mod tests {
         assert_eq!(embedded.config.title.as_deref(), Some("Bridge"));
         assert_eq!(embedded.config.window.as_deref(), Some("320x240"));
         assert_eq!(embedded.config.network, Some(true));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn reads_update_config() {
+        let path = std::env::temp_dir().join(format!("kap-embed-update-{}", std::process::id()));
+        write_embedded(
+            &path,
+            b"pak bytes",
+            r#"{"gameId":"bridge","contentVersion":"1.2.0","update":{"url":"https://cdn.example.com/manifest.json","publicKey":"a2V5"}}"#,
+        );
+        let embedded = read(&path).unwrap();
+        assert_eq!(embedded.config.game_id.as_deref(), Some("bridge"));
+        assert_eq!(embedded.config.content_version.as_deref(), Some("1.2.0"));
+        let update = embedded.config.update.unwrap();
+        assert_eq!(update.url, "https://cdn.example.com/manifest.json");
+        assert_eq!(update.public_key, "a2V5");
         std::fs::remove_file(&path).ok();
     }
 

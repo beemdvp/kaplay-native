@@ -56,6 +56,10 @@ Options that change what the game does when launched:
 | `--window <WxH>` | Initial window size |
 | `--allow-network` | Enable HTTP and WebSocket requests |
 | `--url <url>` | Page URL for `window.location` and relative requests |
+| `--game-id <id>` | Stable id for saves and content updates |
+| `--content-version <v>` | Version of the packaged content (semver) |
+| `--update-url <url>` | Manifest URL checked on launch |
+| `--update-key <key>` | Ed25519 public key (base64 or a `.pub` file) |
 
 `--js-engine v8` also selects the V8 host flavor when the CLI downloads one.
 The result contains only that engine, so a QuickJS-packed game cannot switch to
@@ -94,10 +98,16 @@ The trailer is little-endian:
 | 20 | 4 | config length in bytes |
 
 The config is a JSON object; every key is optional: `jsEngine`, `title`,
-`window`, `network`, `url`. Explicit command-line flags win over the config,
+`window`, `network`, `url`, `gameId`, `contentVersion`, and `update`
+(`url` plus `publicKey`). Explicit command-line flags win over the config,
 which wins over the host defaults. A `--pak` or `--dir` argument also
-overrides the embedded archive, which is useful for testing a new build against
-an existing binary.
+overrides both the embedded and the installed archive, which is useful for
+testing a new build against an existing binary.
+
+`gameId` moves saves to `data_dir()/kaplay-native/<gameId>`. When `update` is
+present, the host also checks that manifest on launch and installs newer content
+for the next start. See [updates.md](updates.md) for the key, manifest, and
+publishing workflow.
 
 The host only reads the trailer from its own executable, so a plain
 `kaplay-native-host` binary is unaffected.
@@ -106,6 +116,16 @@ On macOS, appending to a Mach-O binary invalidates its ad-hoc signature, so
 `pack` runs `codesign --force --sign -` on the output. That is enough to run
 locally and in CI; shipping outside your team still needs a Developer ID
 signature and notarization.
+
+## Content updates
+
+A packed game can update its `.pak` on launch without replacing the executable.
+Pack with `--game-id`, `--content-version`, `--update-url`, and `--update-key`,
+publish a signed manifest, and players pick up new content on their next launch.
+Updates are skipped for Steam launches, headless runs, and explicit `--pak` or
+`--dir` runs. `--reset-content` returns a player to the content embedded in the
+executable, and `--no-update` disables the check. The full workflow is in
+[updates.md](updates.md).
 
 ## Game CI
 
