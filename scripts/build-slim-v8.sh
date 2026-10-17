@@ -14,10 +14,13 @@ case "$(uname -s)" in
 esac
 
 if [ "$HOST_OS" = windows ]; then
-    LIB=librusty_v8.lib
+    LIB=rusty_v8.lib
 else
     LIB=librusty_v8.a
 fi
+
+# Bump when the GN args or the crate patches below change.
+SLIM_V8_RECIPE=r1
 
 TARGET_DIR=${CARGO_TARGET_DIR:-target}
 TARGET=${TARGET:-}
@@ -60,17 +63,27 @@ if [ "$HOST_OS" != linux ]; then
         ICU_I18N=$(cygpath -m "$ICU_SRC/i18n")
         export CPATH="$ICU_COMMON;$ICU_I18N${CPATH:+;$CPATH}"
         export BINDGEN_EXTRA_CLANG_ARGS="-I$ICU_COMMON -I$ICU_I18N"
-        # Without /Gy the unused Wasm and ICU wrappers in binding.cc are not
-        # COMDATs, so /OPT:REF cannot drop them and the host link fails on the
-        # V8 Wasm and ICU symbols this build leaves out.
-        if ! grep -q '"/Gy"' "$V8_DIR/BUILD.gn"; then
-            sed -i 's|"/Zl" |"/Zl", "/Gy" |' "$V8_DIR/BUILD.gn"
-        fi
     else
         export CPATH="$ICU_SRC/common:$ICU_SRC/i18n${CPATH:+:$CPATH}"
         export BINDGEN_EXTRA_CLANG_ARGS="-I$ICU_SRC/common -I$ICU_SRC/i18n"
     fi
     echo "ICU headers for binding.cc: $ICU_SRC"
+
+    # binding.cc wraps the V8 Wasm and ICU APIs unconditionally. This build
+    # leaves both out of V8, and the linker keeps the references even with
+    # function-level linking, so compile the wrappers out instead.
+    BINDING=$V8_DIR/src/binding.cc
+    if ! grep -q '#if defined(V8_ENABLE_WEBASSEMBLY)' "$BINDING"; then
+        awk '
+            /^\/\/ v8::WasmModuleCompilation$/ { print "#if defined(V8_ENABLE_WEBASSEMBLY)" }
+            /^\/\/ v8::CompiledWasmModule$/ { print "#endif" }
+            /^\/\/ icu$/ { print "#if defined(V8_INTL_SUPPORT)" }
+            /^\/\/ v8::PropertyDescriptor$/ { print "#endif" }
+            { print }
+        ' "$BINDING" > "$BINDING.patched"
+        mv "$BINDING.patched" "$BINDING"
+    fi
+    echo "binding.cc guards: $(grep -c 'defined(V8_' "$BINDING")"
 fi
 
 if [ -z "${JOBS:-}" ]; then

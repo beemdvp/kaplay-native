@@ -61,19 +61,20 @@ jobs:
             smoke: true
     steps:
       - uses: actions/checkout@v4
-      - name: Hash the build script
-        id: config
+      - name: Resolve the build recipe
+        id: recipe
         shell: bash
         run: |
           set -euo pipefail
-          if command -v sha256sum >/dev/null 2>&1; then
-            hash=$(sha256sum scripts/build-slim-v8.sh | cut -d' ' -f1)
-          elif command -v shasum >/dev/null 2>&1; then
-            hash=$(shasum -a 256 scripts/build-slim-v8.sh | cut -d' ' -f1)
-          else
-            hash=$(openssl dgst -sha256 scripts/build-slim-v8.sh | awk '{print $NF}')
-          fi
-          echo "SLIM_V8_CONFIG=$hash" >> "$GITHUB_ENV"
+          version=$(awk -F'"' '/^name = "v8"$/{getline; print $2; exit}' Cargo.lock)
+          recipe=$(sed -n 's/^SLIM_V8_RECIPE=//p' scripts/build-slim-v8.sh)
+          llvm=$(sed -n 's/^LLVM_VERSION=//p' scripts/build-slim-v8.sh)
+          test -n "$version" && test -n "$recipe" && test -n "$llvm"
+          {
+            echo "version=$version"
+            echo "config=$version-$recipe"
+            echo "llvm=$llvm"
+          } >> "$GITHUB_OUTPUT"
       - name: Check the published archive
         id: check
         shell: bash
@@ -81,12 +82,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          version=$(awk -F'"' '/^name = "v8"$/{getline; print $2; exit}' Cargo.lock)
+          version=${{ steps.recipe.outputs.version }}
           asset=librusty_v8_slim_${version}_${{ matrix.target }}${{ matrix.lib_ext }}
           notes=$(gh release view "slim-v8-$version" --json body -q .body 2>/dev/null || true)
-          if printf '%s' "$notes" | grep -qF "config=$SLIM_V8_CONFIG" &&
+          if printf '%s' "$notes" | grep -qF "config=${{ steps.recipe.outputs.config }}" &&
             gh release view "slim-v8-$version" --json assets -q '.assets[].name' 2>/dev/null | grep -qxF "$asset"; then
-            echo "$asset is already published for config $SLIM_V8_CONFIG" >> "$GITHUB_STEP_SUMMARY"
+            echo "$asset is already published for ${{ steps.recipe.outputs.config }}" >> "$GITHUB_STEP_SUMMARY"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -118,14 +119,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/kaplay-native
-          key: slim-v8-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-slim-v8.sh') }}
+          key: slim-v8-tools-${{ runner.os }}-${{ runner.arch }}-${{ steps.recipe.outputs.llvm }}
       - name: Restore the slim archive
         if: steps.check.outputs.skip != 'true'
         id: cache
         uses: actions/cache/restore@v4
         with:
           path: target/slim-v8
-          key: slim-v8-${{ hashFiles('Cargo.lock', 'scripts/build-slim-v8.sh') }}-${{ matrix.target }}
+          key: slim-v8-${{ steps.recipe.outputs.config }}-${{ matrix.target }}
       - name: Build the slim archive and host
         if: steps.check.outputs.skip != 'true' && steps.cache.outputs.cache-hit != 'true'
         id: build
@@ -138,7 +139,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: target/slim-v8
-          key: slim-v8-${{ hashFiles('Cargo.lock', 'scripts/build-slim-v8.sh') }}-${{ matrix.target }}
+          key: slim-v8-${{ steps.recipe.outputs.config }}-${{ matrix.target }}
       - name: Smoke the slim host against QuickJS
         if: steps.check.outputs.skip != 'true' && matrix.smoke
         shell: bash
@@ -181,10 +182,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          version=$(awk -F'"' '/^name = "v8"$/{getline; print $2; exit}' Cargo.lock)
+          version=${{ steps.recipe.outputs.version }}
           tag=slim-v8-$version
           asset=librusty_v8_slim_${version}_${{ matrix.target }}${{ matrix.lib_ext }}
-          notes=$(printf 'V8 %s without i18n, WebAssembly and Temporal, built for the kaplay-native v8 hosts.\n\nconfig=%s' "$version" "$SLIM_V8_CONFIG")
+          notes=$(printf 'V8 %s without i18n, WebAssembly and Temporal, built for the kaplay-native v8 hosts.\n\nconfig=%s' "$version" "${{ steps.recipe.outputs.config }}")
           cp "target/slim-v8/${{ matrix.lib }}" "$asset"
           gh release view "$tag" >/dev/null 2>&1 ||
             gh release create "$tag" --title "Slim V8 $version" --notes "$notes" ||
