@@ -122,16 +122,23 @@ jobs:
       - name: Restore the slim archive
         if: steps.check.outputs.skip != 'true'
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: target/slim-v8
           key: slim-v8-${{ hashFiles('Cargo.lock', 'scripts/build-slim-v8.sh') }}-${{ matrix.target }}
       - name: Build the slim archive and host
         if: steps.check.outputs.skip != 'true' && steps.cache.outputs.cache-hit != 'true'
+        id: build
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
         run: scripts/build-slim-v8.sh
+      - name: Save the slim archive
+        if: ${{ !cancelled() && steps.check.outputs.skip != 'true' && steps.build.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: target/slim-v8
+          key: slim-v8-${{ hashFiles('Cargo.lock', 'scripts/build-slim-v8.sh') }}-${{ matrix.target }}
       - name: Smoke the slim host against QuickJS
         if: steps.check.outputs.skip != 'true' && matrix.smoke
         shell: bash
@@ -159,7 +166,7 @@ jobs:
             --script examples/smoke/main.js --dir examples/smoke \
             --window 320x240 --frames 5 --no-steam --no-audio \
             --screenshot-raw quickjs.rgba
-          run "slim-v8-host${{ matrix.exe }}" \
+          run "./slim-v8-host${{ matrix.exe }}" \
             --script examples/smoke/main.js --dir examples/smoke \
             --window 320x240 --frames 5 --no-steam --no-audio \
             --js-engine v8 --screenshot-raw v8.rgba
