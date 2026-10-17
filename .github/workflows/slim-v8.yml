@@ -150,7 +150,9 @@ jobs:
           set -euo pipefail
           slim="${{ matrix.host }}"
           if [ ! -x "$slim" ]; then
-            RUSTY_V8_ARCHIVE="$PWD/target/slim-v8/${{ matrix.lib }}" \
+            # Native Windows processes cannot read Git Bash's /d/a/... paths.
+            root=$(cygpath -m "$PWD" 2>/dev/null || echo "$PWD")
+            RUSTY_V8_ARCHIVE="$root/target/slim-v8/${{ matrix.lib }}" \
               cargo build --release -p kaplay-native-host --no-default-features --features v8
           fi
           cp "$slim" "slim-v8-host${{ matrix.exe }}"
