@@ -60,6 +60,12 @@ if [ "$HOST_OS" != linux ]; then
         ICU_I18N=$(cygpath -m "$ICU_SRC/i18n")
         export CPATH="$ICU_COMMON;$ICU_I18N${CPATH:+;$CPATH}"
         export BINDGEN_EXTRA_CLANG_ARGS="-I$ICU_COMMON -I$ICU_I18N"
+        # Without /Gy the unused Wasm and ICU wrappers in binding.cc are not
+        # COMDATs, so /OPT:REF cannot drop them and the host link fails on the
+        # V8 Wasm and ICU symbols this build leaves out.
+        if ! grep -q '"/Gy"' "$V8_DIR/BUILD.gn"; then
+            sed -i 's|"/Zl" |"/Zl", "/Gy" |' "$V8_DIR/BUILD.gn"
+        fi
     else
         export CPATH="$ICU_SRC/common:$ICU_SRC/i18n${CPATH:+:$CPATH}"
         export BINDGEN_EXTRA_CLANG_ARGS="-I$ICU_SRC/common -I$ICU_SRC/i18n"
@@ -181,10 +187,19 @@ if [ "$HOST_OS" = linux ] && [ -z "${RUSTFLAGS:-}" ]; then
 fi
 
 echo "building slim V8 without i18n, WebAssembly and Temporal (jobs=$JOBS)"
-cargo build --release ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} -p kaplay-native-host --no-default-features --features v8
+built=1
+if ! cargo build --release ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} -p kaplay-native-host --no-default-features --features v8; then
+    built=0
+fi
 
+# Keep the archive even when the host link fails, so a fix to the final link
+# does not rebuild V8 from scratch.
 ARCHIVE=$RELEASE_DIR/gn_out/obj/$LIB
-mkdir -p "$(dirname "$OUT")"
-cp "$ARCHIVE" "$OUT"
+if [ -f "$ARCHIVE" ]; then
+    mkdir -p "$(dirname "$OUT")"
+    cp "$ARCHIVE" "$OUT"
+fi
+[ "$built" = 1 ] || exit 1
+
 echo "slim V8 archive: $OUT"
 echo "rebuild any host against it with RUSTY_V8_ARCHIVE=$OUT"

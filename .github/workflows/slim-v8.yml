@@ -134,7 +134,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: scripts/build-slim-v8.sh
       - name: Save the slim archive
-        if: ${{ !cancelled() && steps.check.outputs.skip != 'true' && steps.build.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && steps.check.outputs.skip != 'true' && steps.cache.outputs.cache-hit != 'true' && hashFiles('target/slim-v8/**') != '' }}
         uses: actions/cache/save@v4
         with:
           path: target/slim-v8
