@@ -35,6 +35,34 @@ OUT=${1:-$TARGET_DIR/slim-v8/$LIB}
 CACHE=${KAPLAY_CACHE_DIR:-$HOME/.cache/kaplay-native}
 LLVM_VERSION=23.1.3
 
+if [ "$HOST_OS" != linux ]; then
+    # binding.cc includes ICU headers even with v8_enable_i18n_support=false.
+    # Linux finds them in the system include path; point the other hosts at
+    # the ICU sources vendored with the v8 crate instead.
+    cargo fetch --locked
+    V8_VERSION=$(awk -F'"' '/^name = "v8"$/{getline; print $2; exit}' Cargo.lock)
+    V8_DIR=""
+    for dir in "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/v8-"$V8_VERSION"; do
+        if [ -d "$dir" ]; then
+            V8_DIR=$dir
+            break
+        fi
+    done
+    if [ -z "$V8_DIR" ]; then
+        echo "could not find the extracted v8-$V8_VERSION crate" >&2
+        exit 1
+    fi
+    ICU_SRC=$V8_DIR/third_party/icu/source
+    if [ "$HOST_OS" = windows ]; then
+        ICU_PATH="$(cygpath -w "$ICU_SRC/common");$(cygpath -w "$ICU_SRC/i18n")"
+        export CPATH="$ICU_PATH"
+        export INCLUDE="$ICU_PATH${INCLUDE:+;$INCLUDE}"
+    else
+        export CPATH="$ICU_SRC/common:$ICU_SRC/i18n${CPATH:+:$CPATH}"
+    fi
+    echo "ICU headers for binding.cc: $ICU_SRC"
+fi
+
 if [ -z "${JOBS:-}" ]; then
     case "$HOST_OS" in
         linux) JOBS=$(nproc 2>/dev/null || echo 4) ;;
@@ -123,6 +151,12 @@ fi
 export NUM_JOBS=$JOBS
 export V8_FROM_SOURCE=1
 export GN_ARGS="${GN_ARGS:+$GN_ARGS }v8_enable_i18n_support=false v8_enable_webassembly=false v8_enable_temporal_support=false use_glib=false"
+
+# build.rs only relaxes -Werror when a system clang is configured, which the
+# Linux path always does; keep the other hosts on the same GN config.
+if [ "$HOST_OS" != linux ] && [ -z "${CLANG_BASE_PATH:-}" ]; then
+    export GN_ARGS="$GN_ARGS treat_warnings_as_errors=false"
+fi
 
 # GN defaults target_cpu to host_cpu, and build.rs pins host_cpu to arm64 on
 # Apple Silicon, so an x86_64 macOS build on an arm64 runner needs it back.

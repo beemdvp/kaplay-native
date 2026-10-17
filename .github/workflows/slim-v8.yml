@@ -23,35 +23,40 @@ jobs:
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             lib: librusty_v8.a
-            ext: .a
+            lib_ext: .a
+            exe: ""
             host: target/release/kaplay-native-host
             smoke: true
           - name: linux-arm64
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             lib: librusty_v8.a
-            ext: .a
+            lib_ext: .a
+            exe: ""
             host: target/release/kaplay-native-host
             smoke: true
           - name: macos-arm64
             os: macos-latest
             target: aarch64-apple-darwin
             lib: librusty_v8.a
-            ext: .a
+            lib_ext: .a
+            exe: ""
             host: target/release/kaplay-native-host
             smoke: true
           - name: macos-x64
             os: macos-latest
             target: x86_64-apple-darwin
             lib: librusty_v8.a
-            ext: .a
+            lib_ext: .a
+            exe: ""
             host: target/x86_64-apple-darwin/release/kaplay-native-host
             smoke: false
           - name: windows-x64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             lib: rusty_v8.lib
-            ext: .lib
+            lib_ext: .lib
+            exe: .exe
             host: target/release/kaplay-native-host.exe
             smoke: true
     steps:
@@ -77,7 +82,7 @@ jobs:
         run: |
           set -euo pipefail
           version=$(awk -F'"' '/^name = "v8"$/{getline; print $2; exit}' Cargo.lock)
-          asset=librusty_v8_slim_${version}_${{ matrix.target }}${{ matrix.ext }}
+          asset=librusty_v8_slim_${version}_${{ matrix.target }}${{ matrix.lib_ext }}
           notes=$(gh release view "slim-v8-$version" --json body -q .body 2>/dev/null || true)
           if printf '%s' "$notes" | grep -qF "config=$SLIM_V8_CONFIG" &&
             gh release view "slim-v8-$version" --json assets -q '.assets[].name' 2>/dev/null | grep -qxF "$asset"; then
@@ -141,7 +146,7 @@ jobs:
             RUSTY_V8_ARCHIVE="$PWD/target/slim-v8/${{ matrix.lib }}" \
               cargo build --release -p kaplay-native-host --no-default-features --features v8
           fi
-          cp "$slim" "slim-v8-host${{ matrix.ext }}"
+          cp "$slim" "slim-v8-host${{ matrix.exe }}"
           cargo build --release -p kaplay-native-host
           run() {
             if [ "${{ runner.os }}" = "Linux" ]; then
@@ -150,11 +155,11 @@ jobs:
               "$@"
             fi
           }
-          run "target/release/kaplay-native-host${{ matrix.ext }}" \
+          run "target/release/kaplay-native-host${{ matrix.exe }}" \
             --script examples/smoke/main.js --dir examples/smoke \
             --window 320x240 --frames 5 --no-steam --no-audio \
             --screenshot-raw quickjs.rgba
-          run "slim-v8-host${{ matrix.ext }}" \
+          run "slim-v8-host${{ matrix.exe }}" \
             --script examples/smoke/main.js --dir examples/smoke \
             --window 320x240 --frames 5 --no-steam --no-audio \
             --js-engine v8 --screenshot-raw v8.rgba
@@ -169,7 +174,7 @@ jobs:
           set -euo pipefail
           version=$(awk -F'"' '/^name = "v8"$/{getline; print $2; exit}' Cargo.lock)
           tag=slim-v8-$version
-          asset=librusty_v8_slim_${version}_${{ matrix.target }}${{ matrix.ext }}
+          asset=librusty_v8_slim_${version}_${{ matrix.target }}${{ matrix.lib_ext }}
           notes=$(printf 'V8 %s without i18n, WebAssembly and Temporal, built for the kaplay-native v8 hosts.\n\nconfig=%s' "$version" "$SLIM_V8_CONFIG")
           cp "target/slim-v8/${{ matrix.lib }}" "$asset"
           gh release view "$tag" >/dev/null 2>&1 ||
