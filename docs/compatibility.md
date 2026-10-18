@@ -71,6 +71,13 @@ drawn canvas rectangle, `movementX/movementY`, and a `buttons` bitmask.
 Keyboard events carry `key`, `code`, `repeat`, modifier flags, and
 `getModifierState`.
 
+`navigator.getGamepads()` exposes standard-mapped gamepads with `id`, `index`,
+`mapping`, `timestamp`, four stick axes, and 17 buttons (digital and analog
+values). `window` receives `gamepadconnected` and `gamepaddisconnected` events,
+and KAPLAY's gamepad bindings and sticks work through the usual polling. The
+list is refreshed from `gilrs` every frame; rumble/haptic output is not
+exposed yet.
+
 While an `input` or `textarea` is focused, keys go to it like they do in a
 browser: printable keys and Backspace edit `value` and fire `input` (Enter adds
 a line break to a `textarea`), `maxLength` is enforced, and the canvas does not
@@ -193,7 +200,7 @@ returns `NO_ERROR`, and `isContextLost` returns `false`.
   `record()`/`MediaRecorder` are not implemented. Without an audio device the
   engine runs silently and playback still advances in real time.
 - Touch events are not delivered from native input yet, so `isTouchscreen()`
-  reports false. `navigator.getGamepads()` returns an empty list.
+  reports false.
 
 ## Platforms
 

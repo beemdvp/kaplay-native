@@ -168,6 +168,7 @@ pub fn install(
     install_auth(scope, native, data);
     install_audio(scope, native, data);
     install_video(scope, native, data);
+    install_gamepad(scope, native, data);
     install_steam(scope, native, data);
     install_updates(scope, native, data);
 
@@ -1128,6 +1129,17 @@ fn audio_duration<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: 
             .and_then(|audio| audio.voice_duration(voice))
             .unwrap_or(-1.0),
     );
+}
+
+fn install_gamepad(scope: &PinScope<'_, '_>, native: Local<v8::Object>, data: Local<Value>) {
+    let object = v8::Object::new(scope);
+    register(scope, object, "list", gamepad_list, data);
+    set_property(scope, native, "gamepad", object.into());
+}
+
+fn gamepad_list<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
+    let json = host(&args).gamepad_json();
+    set_string(scope, &mut rv, &json);
 }
 
 fn install_steam(scope: &PinScope<'_, '_>, native: Local<v8::Object>, data: Local<Value>) {

@@ -64,6 +64,8 @@ and the remaining jobs still run.
 - `canvas` - Canvas 2D operations against a native surface id
 - `gl` - WebGL 1 operations against a GL state handle table
 - `audio` - buffers, voices, mixer parameters, decode jobs, and playback clock
+- `video` - MP4 decoding and frame uploads
+- `gamepad` - standard-mapped snapshots (`list() -> JSON`)
 - `steam` - Steamworks user, achievements, stats, cloud
 
 Handles are `u32`; `-1` or a missing key means `null` on the JS side. Uploads

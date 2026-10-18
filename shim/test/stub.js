@@ -26,6 +26,7 @@ export function installStub() {
     const state = {
         time: 0,
         storage: new Map(),
+        gamepads: [],
         nextId: 1,
         nextCanvas: 1,
     };
@@ -150,6 +151,9 @@ export function installStub() {
             },
         },
         gl: {},
+        gamepad: {
+            list: () => JSON.stringify(state.gamepads),
+        },
         auth: {
             open: (url) => {
                 record("auth.open", [url]);

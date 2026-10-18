@@ -3,6 +3,7 @@ mod auth;
 mod bridge;
 mod config;
 mod embed;
+mod gamepad;
 mod js;
 mod keys;
 mod screenshots;

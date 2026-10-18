@@ -34,6 +34,8 @@ for the manual validation checklist.
 - Runtime: window, GL 2.1 compatibility context, frame loop, aspect-fit present
 - Bridge: WebGL 1, Canvas 2D, images, fonts, timers, events, `localStorage`,
   and an `index.html` document tree
+- Input: keyboard, mouse, and standard-mapped gamepads with connect/disconnect
+  events
 - Network: `fetch` (HTTP/HTTPS) and `WebSocket` (ws/wss) on background threads
 - Audio: Web Audio nodes over a native software mixer, plus `HTMLAudioElement`
   music, decoding WAV, MP3, FLAC, Ogg Vorbis, and Opus; `OscillatorNode` and
@@ -46,9 +48,9 @@ for the manual validation checklist.
 - Engines: QuickJS by default, optional V8 backend for full modern JS and `Intl`
 - CLI: `run`, `dev`, `build`, `pack`, `test`, `engines`, `doctor`
 
-Not implemented yet: gamepads, touch input, screen recording, and the Steam
-Input action manifest. QuickJS builds have no `Intl`; use the V8 backend for
-locale-aware APIs. See [docs/engines.md](docs/engines.md) for the engine
+Not implemented yet: touch input, screen recording, gamepad haptics, and the
+Steam Input action manifest. QuickJS builds have no `Intl`; use the V8 backend
+for locale-aware APIs. See [docs/engines.md](docs/engines.md) for the engine
 matrix.
 
 ## Quick start
@@ -58,6 +60,12 @@ Build the host and run the examples with the KAPLAY bundle from a checkout:
 ```sh
 cargo build --release
 node cli/src/index.mjs run examples/hello --preload path/to/kaplay.js
+```
+
+On Linux, building the host needs the `libudev` development headers:
+
+```sh
+sudo apt-get install libudev-dev
 ```
 
 Both KAPLAY builds work as preloads: the classic `kaplay.js` defines its

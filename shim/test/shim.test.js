@@ -1359,3 +1359,66 @@ test("fonts load from http urls and data urls", async () => {
     registered = stub.calls.filter((call) => call.name === "font.register").at(-1);
     assert.deepEqual(registered.args, ["InlineFont", 4]);
 });
+
+test("navigator.getGamepads exposes native snapshots and fills index gaps", () => {
+    const snapshot = {
+        id: "Test Pad (STANDARD GAMEPAD)",
+        index: 2,
+        connected: true,
+        mapping: "standard",
+        timestamp: 42,
+        axes: [0.25, -0.5, 0, 1],
+        buttons: [{ pressed: true, touched: true, value: 1 }],
+    };
+    stub.state.gamepads = [snapshot];
+
+    const gamepads = navigator.getGamepads();
+    assert.equal(gamepads.length, 3);
+    assert.equal(gamepads[0], null);
+    assert.equal(gamepads[1], null);
+    assert.equal(gamepads[2].id, snapshot.id);
+    assert.equal(gamepads[2].index, 2);
+    assert.deepEqual(gamepads[2].axes, snapshot.axes);
+    assert.deepEqual(gamepads[2].buttons, snapshot.buttons);
+    assert.equal(navigator.getGamepads()[2], gamepads[2]);
+
+    stub.state.gamepads = [];
+});
+
+test("gamepad connect and disconnect events carry the cached gamepad", () => {
+    const snapshot = {
+        id: "Test Pad (STANDARD GAMEPAD)",
+        index: 0,
+        connected: true,
+        mapping: "standard",
+        timestamp: 7,
+        axes: [0, 0, 0, 0],
+        buttons: [{ pressed: false, touched: false, value: 0 }],
+    };
+    stub.state.gamepads = [snapshot];
+    const events = [];
+    const connected = (event) => events.push(event);
+    const disconnected = (event) => events.push(event);
+    window.addEventListener("gamepadconnected", connected);
+    window.addEventListener("gamepaddisconnected", disconnected);
+
+    globalThis.__kapNative_dispatch("gamepadconnected", JSON.stringify(snapshot));
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, "gamepadconnected");
+    assert.equal(events[0].gamepad.id, snapshot.id);
+    assert.equal(navigator.getGamepads()[0], events[0].gamepad);
+
+    stub.state.gamepads = [];
+    globalThis.__kapNative_dispatch(
+        "gamepaddisconnected",
+        JSON.stringify({ index: 0, id: snapshot.id }),
+    );
+    assert.equal(events.length, 2);
+    assert.equal(events[1].type, "gamepaddisconnected");
+    assert.equal(events[1].gamepad, events[0].gamepad);
+    assert.equal(events[1].gamepad.connected, false);
+    assert.equal(navigator.getGamepads().length, 0);
+
+    window.removeEventListener("gamepadconnected", connected);
+    window.removeEventListener("gamepaddisconnected", disconnected);
+});
