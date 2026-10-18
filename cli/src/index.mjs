@@ -17,7 +17,6 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { findLocalHost } from "./host.mjs";
-import { isMachO, isPe, patchWindowsIcon, prepareIcon } from "./icon.mjs";
 import { createZip } from "./zip.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -105,7 +104,6 @@ Common options:
   --x11             Prefer the X11 backend on Linux
   --no-update       Skip the content update check
   --reset-content   Delete installed content updates before starting
-  --icon <png>      Square PNG for the window, Windows exe, and macOS icns
 
 Content update options:
   --game-id <id>        Stable id for saves and updates
@@ -207,16 +205,6 @@ function slugify(value) {
         .replace(/[^a-z0-9._-]+/g, "-")
         .replace(/^[.-]+|[.-]+$/g, "")
         .slice(0, 96);
-}
-
-function loadIcon(value) {
-    const path = resolve(value);
-    if (!existsSync(path)) fail(`icon not found: ${path}`);
-    try {
-        return prepareIcon(readFileSync(path));
-    } catch (error) {
-        fail(`--icon ${value}: ${error.message}`);
-    }
 }
 
 function readPublicKey(value) {
@@ -429,6 +417,12 @@ async function buildCommand(options) {
     console.log(`packed ${pak.count} files into ${out}${pak.bundled ? " (bundled with esbuild)" : ""}`);
 }
 
+function isMachO(buffer) {
+    if (buffer.length < 4) return false;
+    const magic = new Set([0xfeedface, 0xfeedfacf, 0xcafebabe, 0xcefaedfe, 0xcffaedfe, 0xbebafeca]);
+    return magic.has(buffer.readUInt32BE(0)) || magic.has(buffer.readUInt32LE(0));
+}
+
 function adhocSign(path, hostBytes) {
     if (!isMachO(hostBytes)) return;
     const result = spawnSync("codesign", ["--force", "--sign", "-", path], { encoding: "utf8" });
@@ -496,7 +490,6 @@ async function packCommand(options) {
     if (updateUrl && (!gameId || !contentVersion)) {
         fail("--update-url also needs --game-id and --content-version");
     }
-    const icon = options.icon ? loadIcon(requireValue(options, "icon", "--icon value")) : null;
     const config = {};
     if (options["js-engine"]) config.jsEngine = options["js-engine"];
     if (options.title) config.title = options.title;
@@ -505,7 +498,6 @@ async function packCommand(options) {
     if (options.url) config.url = options.url;
     if (gameId) config.gameId = gameId;
     if (contentVersion) config.contentVersion = contentVersion;
-    if (icon) config.icon = icon.windowPng.toString("base64");
     if (updateUrl) {
         config.update =
             updateKeys.length === 1
@@ -522,18 +514,7 @@ async function packCommand(options) {
     trailer.writeUInt32LE(TRAILER_VERSION, 8);
     trailer.writeBigUInt64LE(BigInt(pakBytes.length), 12);
     trailer.writeUInt32LE(configBytes.length, 20);
-    let hostBytes = readFileSync(host);
-    if (icon) {
-        if (isPe(hostBytes)) {
-            try {
-                hostBytes = patchWindowsIcon(hostBytes, icon.ico);
-            } catch (error) {
-                fail(`failed to add the Windows icon: ${error.message}`);
-            }
-        } else if (isMachO(hostBytes)) {
-            writeFileSync(`${out}.icns`, icon.icns);
-        }
-    }
+    const hostBytes = readFileSync(host);
     writeFileSync(out, Buffer.concat([hostBytes, pakBytes, configBytes, trailer]));
     if (process.platform !== "win32") chmodSync(out, 0o755);
     adhocSign(out, hostBytes);

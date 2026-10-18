@@ -225,15 +225,6 @@ fn main() -> anyhow::Result<()> {
         .or(pack.window.as_deref())
         .map(parse_size)
         .unwrap_or((960, 540));
-    let game_name = args
-        .title
-        .or(pack.title)
-        .unwrap_or_else(|| "KAPLAY".to_string());
-    let app_name = pack
-        .game_id
-        .clone()
-        .unwrap_or_else(|| app_id_name(&game_name));
-    let icon = pack.icon.as_deref().and_then(decode_icon);
 
     let config = HostConfig {
         script: args.script,
@@ -254,53 +245,14 @@ fn main() -> anyhow::Result<()> {
         bench_json: args.bench_json,
         frame_trace: args.frame_trace,
         save_dir,
-        game_name,
-        app_name,
-        icon,
+        game_name: args
+            .title
+            .or(pack.title)
+            .unwrap_or_else(|| "KAPLAY".to_string()),
         url: args.url.or(pack.url),
         js_engine,
         updates: update_state,
     };
 
     HostApp::new(config, std::rc::Rc::new(source))?.run()
-}
-
-fn app_id_name(name: &str) -> String {
-    let id: String = name
-        .chars()
-        .map(|ch| match ch {
-            'A'..='Z' => ch.to_ascii_lowercase(),
-            'a'..='z' | '0'..='9' | '.' | '-' | '_' => ch,
-            _ => '-',
-        })
-        .collect();
-    let id = id.trim_matches(|ch| ch == '-' || ch == '.');
-    if id.is_empty() {
-        "kaplay-native".to_string()
-    } else {
-        id.to_string()
-    }
-}
-
-fn decode_icon(encoded: &str) -> Option<Vec<u8>> {
-    use base64::Engine as _;
-    match base64::engine::general_purpose::STANDARD.decode(encoded) {
-        Ok(bytes) => Some(bytes),
-        Err(error) => {
-            log::warn!("packed window icon is not valid base64: {error}");
-            None
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::app_id_name;
-
-    #[test]
-    fn derives_wayland_app_ids() {
-        assert_eq!(app_id_name("Frax Rupture"), "frax-rupture");
-        assert_eq!(app_id_name(" gg.frax.rupture "), "gg.frax.rupture");
-        assert_eq!(app_id_name("!!!"), "kaplay-native");
-    }
 }

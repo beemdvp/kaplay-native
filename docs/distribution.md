@@ -60,7 +60,6 @@ Options that change what the game does when launched:
 | `--content-version <v>` | Version of the packaged content (semver) |
 | `--update-url <url>` | Manifest URL checked on launch |
 | `--update-key <key>` | Ed25519 public key (base64 or a `.pub` file) |
-| `--icon <png>` | Square PNG (256-2048) for the window and platform icons |
 
 `--js-engine v8` also selects the V8 host flavor when the CLI downloads one.
 The result contains only that engine, so a QuickJS-packed game cannot switch to
@@ -68,25 +67,6 @@ V8 at runtime; pack with `--js-engine v8` to ship V8.
 
 Everything else (`--host`, `--out`, `--entry`, `--web-dist`, `--pak`) controls
 packaging itself. Pack from an existing archive with `--pak game.pak`.
-
-### Icons
-
-`--icon` takes one square PNG and prepares it for the target host:
-
-- **Window and taskbar:** a normalized 128x128 copy is embedded in the config
-  and handed to the window system, so Windows and X11 show it before and while
-  the game runs. Wayland does not accept client icons; it matches the app id
-  (`--game-id`, or a slug of `--title`) against an installed `.desktop` file.
-- **Windows executable:** `pack` adds a multi-size icon group to the PE, so
-  Explorer, shortcuts, and the taskbar use the same icon when the game is not
-  running. Patching the PE invalidates an existing Authenticode signature, so
-  sign the packed output if you ship a signed build.
-- **macOS:** `pack` writes `<output>.icns` beside the binary. Copy it into the
-  bundle as `Contents/Resources/AppIcon.icns` and set `CFBundleIconFile` to
-  `AppIcon`; Finder and the Dock read the bundle icon.
-- **Linux launchers:** the window icon covers X11 taskbars. Add a `.desktop`
-  file whose name matches the app id and set `Icon=` to an installed PNG to
-  cover application menus and Wayland compositors.
 
 At runtime the embedded defaults sit between the command line and the built-in
 defaults, so all of these still work on a packed game:

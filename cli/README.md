@@ -15,8 +15,7 @@ kaplay-native doctor
 `run` executes a game with the native host. `pack` writes a single-file
 executable for the current platform with the game assets and defaults embedded,
 so players need nothing else. The CLI downloads the matching native host from
-GitHub releases on first use and caches it. Pass `--icon logo.png` to set the
-window icon, add a Windows executable icon, and write the macOS `.icns` sidecar.
+GitHub releases on first use and caches it.
 
 Packed games can also update their content without replacing the executable.
 `keygen` creates an Ed25519 key pair, `pack --update-url --update-key` embeds the
