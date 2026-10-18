@@ -1023,6 +1023,183 @@ test("scheduled oscillators and biquads produce filtered PCM and free it on end"
     assert.ok(rejected < pass / 10, `${pass} vs ${rejected}`);
 });
 
+test("delay nodes render their delayed tap into the native buffer", () => {
+    const context = new AudioContext();
+    const source = context.createBufferSource();
+    const impulse = context.createBuffer(1, 480, 48000);
+    impulse.getChannelData(0)[0] = 1;
+    source.buffer = impulse;
+    const delay = context.createDelay(0.1);
+    delay.delayTime.value = 0.01;
+    source.connect(delay).connect(context.destination);
+    source.start(context.currentTime, 0, 0.02);
+    advance(0);
+    const play = stub.calls.findLast((call) => call.name === "audio.play");
+    const buffer = stub.audio.buffers.get(play.args[1]);
+    assert.ok(buffer.frames >= 960 && buffer.frames <= 961);
+    assert.equal(buffer.channels, 2);
+    assert.ok(Math.abs(buffer.data[480 * 2] - 1) < 1e-6);
+    assert.ok(Math.abs(buffer.data[480 * 2 + 1] - 1) < 1e-6);
+    stub.audio.end(play.args[0]);
+});
+
+test("wave shapers map samples through their curve", () => {
+    const context = new AudioContext();
+    const source = context.createBufferSource();
+    const flat = context.createBuffer(1, 480, 48000);
+    flat.getChannelData(0).fill(0.5);
+    source.buffer = flat;
+    const shaper = context.createWaveShaper();
+    shaper.curve = new Float32Array([0, 1]);
+    source.connect(shaper).connect(context.destination);
+    source.start(context.currentTime, 0, 0.01);
+    advance(0);
+    const play = stub.calls.findLast((call) => call.name === "audio.play");
+    const buffer = stub.audio.buffers.get(play.args[1]);
+    assert.ok(Math.abs(buffer.data[0] - 0.75) < 1e-6);
+    stub.audio.end(play.args[0]);
+});
+
+test("dynamics compressors reduce loud signals", () => {
+    const context = new AudioContext();
+    const source = context.createBufferSource();
+    const flat = context.createBuffer(1, 4800, 48000);
+    flat.getChannelData(0).fill(0.5);
+    source.buffer = flat;
+    const compressor = context.createDynamicsCompressor();
+    compressor.threshold.value = -20;
+    compressor.ratio.value = 4;
+    compressor.attack.value = 0.001;
+    compressor.release.value = 0.1;
+    source.connect(compressor).connect(context.destination);
+    source.start(context.currentTime, 0, 0.1);
+    advance(0);
+    const play = stub.calls.findLast((call) => call.name === "audio.play");
+    const buffer = stub.audio.buffers.get(play.args[1]);
+    assert.ok(buffer.data[4800 * 2 - 2] < 0.3, String(buffer.data[4800 * 2 - 2]));
+    assert.ok(compressor.reduction > 0);
+    stub.audio.end(play.args[0]);
+});
+
+test("IIR filters apply feedforward and feedback coefficients", () => {
+    const context = new AudioContext();
+    const source = context.createBufferSource();
+    const flat = context.createBuffer(1, 480, 48000);
+    flat.getChannelData(0).fill(1);
+    source.buffer = flat;
+    const filter = context.createIIRFilter([0.5, 0.5], [1]);
+    source.connect(filter).connect(context.destination);
+    source.start(context.currentTime, 0, 0.01);
+    advance(0);
+    const play = stub.calls.findLast((call) => call.name === "audio.play");
+    const buffer = stub.audio.buffers.get(play.args[1]);
+    assert.ok(Math.abs(buffer.data[0] - 0.5) < 1e-6);
+    assert.ok(Math.abs(buffer.data[2] - 1) < 1e-6);
+    stub.audio.end(play.args[0]);
+});
+
+test("channel splitters and mergers route individual channels", () => {
+    const context = new AudioContext();
+    const source = context.createBufferSource();
+    const stereo = context.createBuffer(2, 48, 48000);
+    stereo.getChannelData(0).fill(0.25);
+    stereo.getChannelData(1).fill(-0.5);
+    source.buffer = stereo;
+    const splitter = context.createChannelSplitter(2);
+    const merger = context.createChannelMerger(2);
+    source.connect(splitter);
+    splitter.connect(merger, 0, 1);
+    splitter.connect(merger, 1, 0);
+    merger.connect(context.destination);
+    source.start(context.currentTime, 0, 0.001);
+    advance(0);
+    const play = stub.calls.findLast((call) => call.name === "audio.play");
+    const buffer = stub.audio.buffers.get(play.args[1]);
+    assert.ok(Math.abs(buffer.data[0] + 0.5) < 1e-6);
+    assert.ok(Math.abs(buffer.data[1] - 0.25) < 1e-6);
+    stub.audio.end(play.args[0]);
+});
+
+test("convolvers render impulse responses", () => {
+    const context = new AudioContext();
+    const source = context.createBufferSource();
+    const impulse = context.createBuffer(1, 480, 48000);
+    impulse.getChannelData(0)[0] = 1;
+    source.buffer = impulse;
+    const response = context.createBuffer(1, 48, 48000);
+    response.getChannelData(0)[0] = 1;
+    const convolver = context.createConvolver();
+    convolver.normalize = false;
+    convolver.buffer = response;
+    source.connect(convolver).connect(context.destination);
+    source.start(context.currentTime, 0, 0.01);
+    advance(0);
+    const play = stub.calls.findLast((call) => call.name === "audio.play");
+    const buffer = stub.audio.buffers.get(play.args[1]);
+    assert.ok(Math.abs(buffer.data[0] - 1) < 1e-6);
+    assert.ok(Math.abs(buffer.data[1] - 1) < 1e-6);
+    assert.ok(Math.abs(buffer.data[2]) < 1e-6);
+    stub.audio.end(play.args[0]);
+});
+
+test("panners position mono sources with distance attenuation", () => {
+    const context = new AudioContext();
+    const source = context.createBufferSource();
+    const flat = context.createBuffer(1, 480, 48000);
+    flat.getChannelData(0).fill(1);
+    source.buffer = flat;
+    const panner = context.createPanner();
+    panner.positionX.value = 1;
+    source.connect(panner).connect(context.destination);
+    source.start(context.currentTime, 0, 0.01);
+    advance(0);
+    const play = stub.calls.findLast((call) => call.name === "audio.play");
+    const buffer = stub.audio.buffers.get(play.args[1]);
+    assert.ok(buffer.data[0] > 0);
+    assert.ok(buffer.data[1] > buffer.data[0]);
+    stub.audio.end(play.args[0]);
+});
+
+test("periodic waves drive custom oscillator output", () => {
+    const context = new AudioContext();
+    const oscillator = context.createOscillator();
+    oscillator.setPeriodicWave(context.createPeriodicWave([0, 0], [0, 1]));
+    oscillator.frequency.value = 1000;
+    oscillator.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(0.01);
+    advance(0);
+    const play = stub.calls.findLast((call) => call.name === "audio.play");
+    const buffer = stub.audio.buffers.get(play.args[1]);
+    const energy = buffer.data.reduce((sum, sample) => sum + sample * sample, 0);
+    assert.ok(energy > 0.01, String(energy));
+    stub.audio.end(play.args[0]);
+});
+
+test("analyser nodes expose time and frequency data from the master output", () => {
+    const samples = Array.from({ length: 32768 }, (_, index) => Math.sin(2 * Math.PI * 1000 * index / 48000));
+    stub.state.analyser = samples;
+    const context = new AudioContext();
+    const analyser = context.createAnalyser();
+    const time = new Float32Array(analyser.fftSize);
+    analyser.getFloatTimeDomainData(time);
+    assert.ok(time.some((sample) => sample !== 0));
+
+    const bytes = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(bytes);
+    assert.ok(bytes.some((value) => value > 0));
+
+    analyser.smoothingTimeConstant = 0;
+    const decibels = new Float32Array(analyser.frequencyBinCount);
+    analyser.getFloatFrequencyData(decibels);
+    assert.ok(decibels.every(Number.isFinite));
+    let peak = 0;
+    for (let index = 1; index < decibels.length; index++) if (decibels[index] > decibels[peak]) peak = index;
+    assert.ok(peak >= 40 && peak <= 45, String(peak));
+    assert.throws(() => { analyser.fftSize = 1000; });
+    stub.state.analyser = [];
+});
+
 test("styles expose the CSS property API", () => {
     const element = document.createElement("div");
     element.style.setProperty("opacity", "0.5");

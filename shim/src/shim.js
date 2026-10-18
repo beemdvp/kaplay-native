@@ -2013,10 +2013,19 @@
             this.context = context;
             this.__outs = [];
             this.__ins = [];
+            this.__edges = [];
         }
 
-        connect(node) {
+        connect(node, output = 0, input = 0) {
             if (!node) return node;
+            const edge = {
+                node,
+                output: Math.max(0, Number(output) || 0),
+                input: Math.max(0, Number(input) || 0),
+            };
+            if (!this.__edges.some((item) => item.node === node && item.output === edge.output && item.input === edge.input)) {
+                this.__edges.push(edge);
+            }
             if (!this.__outs.includes(node)) {
                 this.__outs.push(node);
                 if (Array.isArray(node.__ins)) node.__ins.push(this);
@@ -2032,6 +2041,7 @@
                 if (index >= 0) out.__ins.splice(index, 1);
             }
             this.__outs = [];
+            this.__edges = [];
             syncAudioGraph();
         }
     }
@@ -2167,7 +2177,7 @@
                 this.__stopTime = this.__startTime + (Number(duration) || 0);
             }
             if (this.buffer) {
-                if (filterPaths(this).some((path) => path.some((node) => node instanceof BiquadFilterNode))) {
+                if (needsGraphRender(this)) {
                     setTimeoutFn(() => this.__createVoice(), 0);
                 } else {
                     this.__createVoice();
@@ -2196,17 +2206,22 @@
         }
 
         __createVoice() {
+            if (!audioAvailable()) return;
+            const fallback = this instanceof OscillatorNode ? 2 : 30;
+            const duration = this.__stopTime > this.__startTime
+                ? this.__stopTime - this.__startTime
+                : (this.buffer ? this.buffer.duration : fallback);
             let buffer = this.buffer;
-            if (!buffer || !audioAvailable()) return;
-            const duration = this.__stopTime > this.__startTime ? this.__stopTime - this.__startTime : buffer.duration;
-            const rendered = renderFiltered(this, buffer, this.__startTime, duration, this.__offset);
-            if (rendered) {
-                buffer = rendered;
-                this.__renderedGraph = true;
+            let rendered = null;
+            if (needsGraphRender(this)) {
+                rendered = renderGraph(this, this.__startTime, duration);
+                if (rendered) buffer = rendered;
             }
+            if (!buffer) return;
             const nativeId = buffer.__upload();
             if (!nativeId) return;
-            if (rendered || this instanceof OscillatorNode) this.__ownedBuffers.push(nativeId);
+            if (rendered) this.__ownedBuffers.push(nativeId);
+            this.__renderedGraph = Boolean(rendered);
             const params = this.__renderedGraph ? { gain: 1, pan: 0 } : graphParams(this);
             const startFrame = this.__startTime > audioNow() ? this.__startTime * this.context.sampleRate : -1;
             const voice = audioBridge.play(
@@ -2273,74 +2288,823 @@
         }
     }
 
-    function filterPaths(source) {
-        const paths = [];
-        const visit = (node, path) => {
-            if (path.includes(node) || path.length > 32) return;
-            if (node.__isDestination) {
-                paths.push(path);
-                return;
-            }
-            for (const out of node.__outs) visit(out, [...path, node]);
-        };
-        for (const out of source.__outs) visit(out, []);
-        return paths;
+    class DelayNode extends AudioNode {
+        constructor(context, maxDelayTime = 1) {
+            super(context);
+            this.__maxDelayTime = Math.max(0, Math.min(180, Number(maxDelayTime) || 0));
+            this.delayTime = new AudioParam(0, this);
+        }
     }
 
-    function renderFiltered(source, buffer, start, duration, offset) {
-        const paths = filterPaths(source);
-        if (!paths.some((path) => path.some((node) => node instanceof BiquadFilterNode))) return null;
-        if (duration > 30) throw new RangeError("native filtered notes are limited to 30 seconds");
-        const rate = buffer.sampleRate;
-        const length = Math.max(1, Math.ceil(duration * rate));
-        const rendered = source.context.createBuffer(buffer.numberOfChannels, length, rate);
-        for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
-            const input = buffer.getChannelData(channel);
-            const output = rendered.getChannelData(channel);
-            for (const path of paths) {
-                const states = new Map();
-                for (let index = 0; index < length; index++) {
-                    const position = Math.floor(offset * rate) + index;
-                    let sample = source.loop ? input[position % input.length] : input[position] || 0;
-                    const time = start + index / rate;
-                    for (const node of path) {
-                        if (node instanceof GainNode) {
-                            sample *= node.gain.__valueAt(time);
-                        } else if (node instanceof BiquadFilterNode) {
-                            const frequency = Math.max(1, Math.min(rate * 0.499, node.frequency.__valueAt(time) * Math.pow(2, node.detune.__valueAt(time) / 1200)));
-                            const omega = 2 * Math.PI * frequency / rate;
-                            const cosine = Math.cos(omega);
-                            const alpha = Math.sin(omega) / (2 * Math.max(0.001, node.Q.__valueAt(time)));
-                            let b0, b1, b2;
-                            if (node.type === "bandpass") {
-                                b0 = alpha;
-                                b1 = 0;
-                                b2 = -alpha;
-                            } else if (node.type === "highpass") {
-                                b0 = (1 + cosine) / 2;
-                                b1 = -1 - cosine;
-                                b2 = b0;
-                            } else if (node.type === "notch") {
-                                b0 = 1;
-                                b1 = -2 * cosine;
-                                b2 = 1;
-                            } else if (node.type === "lowpass") {
-                                b0 = (1 - cosine) / 2;
-                                b1 = 1 - cosine;
-                                b2 = b0;
-                            } else {
-                                throw new Error("unsupported native biquad type: " + node.type);
-                            }
-                            const state = states.get(node) || [0, 0, 0, 0];
-                            const value = (b0 * sample + b1 * state[0] + b2 * state[1] + 2 * cosine * state[2] - (1 - alpha) * state[3]) / (1 + alpha);
-                            states.set(node, [sample, state[0], value, state[2]]);
-                            sample = value;
-                        }
-                    }
-                    output[index] += sample;
+    class WaveShaperNode extends AudioNode {
+        constructor(context) {
+            super(context);
+            this.__curve = null;
+            this.oversample = "none";
+        }
+
+        get curve() {
+            return this.__curve;
+        }
+
+        set curve(value) {
+            if (value === null || value === undefined) {
+                this.__curve = null;
+                return;
+            }
+            this.__curve = Float32Array.from(value);
+        }
+    }
+
+    class DynamicsCompressorNode extends AudioNode {
+        constructor(context) {
+            super(context);
+            this.threshold = new AudioParam(-24, this);
+            this.knee = new AudioParam(30, this);
+            this.ratio = new AudioParam(12, this);
+            this.attack = new AudioParam(0.003, this);
+            this.release = new AudioParam(0.25, this);
+            this.reduction = 0;
+        }
+    }
+
+    class ConvolverNode extends AudioNode {
+        constructor(context) {
+            super(context);
+            this.__buffer = null;
+            this.normalize = true;
+        }
+
+        get buffer() {
+            return this.__buffer;
+        }
+
+        set buffer(value) {
+            this.__buffer = value || null;
+        }
+    }
+
+    class ChannelSplitterNode extends AudioNode {
+        constructor(context, numberOfOutputs = 6) {
+            super(context);
+            this.numberOfOutputs = Math.max(1, Math.min(32, Math.round(Number(numberOfOutputs) || 6)));
+        }
+    }
+
+    class ChannelMergerNode extends AudioNode {
+        constructor(context, numberOfInputs = 6) {
+            super(context);
+            this.numberOfInputs = Math.max(1, Math.min(32, Math.round(Number(numberOfInputs) || 6)));
+        }
+    }
+
+    class IIRFilterNode extends AudioNode {
+        constructor(context, feedforward, feedback) {
+            super(context);
+            const feed = Float32Array.from(feedforward || []);
+            const back = Float32Array.from(feedback || []);
+            if (!feed.length || feed.length > 20 || !back.length || back.length > 20) {
+                throw new Error("IIR filters require 1 to 20 coefficients");
+            }
+            if (Math.abs(back[0]) < 1e-12) throw new Error("IIR feedback[0] must not be zero");
+            this.__feedforward = feed;
+            this.__feedback = back;
+        }
+
+        getFrequencyResponse(frequencyHz, magResponse, phaseResponse) {
+            const length = Math.min(frequencyHz.length, magResponse.length, phaseResponse.length);
+            for (let index = 0; index < length; index++) {
+                const omega = 2 * Math.PI * frequencyHz[index] / this.context.sampleRate;
+                let numeratorReal = 0;
+                let numeratorImag = 0;
+                let denominatorReal = 0;
+                let denominatorImag = 0;
+                for (let k = 0; k < this.__feedforward.length; k++) {
+                    numeratorReal += this.__feedforward[k] * Math.cos(-omega * k);
+                    numeratorImag += this.__feedforward[k] * Math.sin(-omega * k);
+                }
+                for (let k = 0; k < this.__feedback.length; k++) {
+                    denominatorReal += this.__feedback[k] * Math.cos(-omega * k);
+                    denominatorImag += this.__feedback[k] * Math.sin(-omega * k);
+                }
+                const denominator = denominatorReal * denominatorReal + denominatorImag * denominatorImag;
+                const real = (numeratorReal * denominatorReal + numeratorImag * denominatorImag) / (denominator || 1e-12);
+                const imag = (numeratorImag * denominatorReal - numeratorReal * denominatorImag) / (denominator || 1e-12);
+                magResponse[index] = Math.hypot(real, imag);
+                phaseResponse[index] = Math.atan2(imag, real);
+            }
+        }
+    }
+
+    class PannerNode extends AudioNode {
+        constructor(context) {
+            super(context);
+            this.positionX = new AudioParam(0, this);
+            this.positionY = new AudioParam(0, this);
+            this.positionZ = new AudioParam(0, this);
+            this.orientationX = new AudioParam(1, this);
+            this.orientationY = new AudioParam(0, this);
+            this.orientationZ = new AudioParam(0, this);
+            this.panningModel = "equalpower";
+            this.distanceModel = "inverse";
+            this.refDistance = 1;
+            this.maxDistance = 10000;
+            this.rolloffFactor = 1;
+            this.coneInnerAngle = 360;
+            this.coneOuterAngle = 360;
+            this.coneOuterGain = 0;
+        }
+    }
+
+    class ConstantSourceNode extends AudioNode {
+        constructor(context) {
+            super(context);
+            this.offset = new AudioParam(1, this);
+            this.onended = null;
+            this.__voice = -1;
+            this.__started = false;
+            this.__startTime = 0;
+            this.__stopTime = -1;
+            this.__ownedBuffers = [];
+            this.__listeners = makeListeners();
+        }
+
+        start(when = 0) {
+            if (this.__started) throw new Error("cannot call start more than once");
+            this.__started = true;
+            this.__startTime = Math.max(audioNow(), Number(when) || 0);
+            setTimeoutFn(() => this.__createVoice(), 0);
+        }
+
+        stop(when = 0) {
+            if (!this.__started) return;
+            const time = Number(when) || 0;
+            this.__stopTime = time;
+            if (this.__voice >= 0) {
+                if (time > audioNow() && audioBridge && audioBridge.stopAt) {
+                    audioBridge.stopAt(this.__voice, time * this.context.sampleRate);
+                } else {
+                    audioBridge.stop(this.__voice);
+                    this.__voice = -1;
+                    audioVoices.delete(this);
+                    this.__fireEnded();
                 }
             }
         }
+
+        __duration() {
+            if (this.__stopTime > this.__startTime) return this.__stopTime - this.__startTime;
+            return 30;
+        }
+
+        __createVoice() {
+            if (!audioAvailable()) return;
+            const buffer = renderGraph(this, this.__startTime, this.__duration());
+            if (!buffer) return;
+            const nativeId = buffer.__upload();
+            if (!nativeId) return;
+            this.__ownedBuffers.push(nativeId);
+            const voice = audioBridge.play(nativeId, 1, 0, 1, this.__stopTime < 0, 0, this.__startTime > audioNow() ? this.__startTime * this.context.sampleRate : -1);
+            if (voice < 0) return;
+            this.__voice = voice;
+            audioVoices.add(this);
+            if (this.__stopTime >= 0) audioBridge.stopAt(voice, this.__stopTime * this.context.sampleRate);
+        }
+
+        __syncAudio() {}
+
+        addEventListener(type, fn) {
+            this.__listeners.add(type, fn);
+        }
+
+        removeEventListener(type, fn) {
+            this.__listeners.remove(type, fn);
+        }
+
+        __fireEnded() {
+            for (const id of this.__ownedBuffers.splice(0)) {
+                if (audioBridge && audioBridge.freeBuffer) audioBridge.freeBuffer(id);
+            }
+            const event = makeEvent("ended", {});
+            event.target = this;
+            try {
+                if (typeof this.onended === "function") this.onended(event);
+            } catch (error) {
+                reportError(error);
+            }
+            this.__listeners.emit(event);
+        }
+    }
+
+    class AnalyserNode extends AudioNode {
+        constructor(context) {
+            super(context);
+            this.__fftSize = 2048;
+            this.minDecibels = -100;
+            this.maxDecibels = -30;
+            this.smoothingTimeConstant = 0.8;
+            this.__smoothed = null;
+        }
+
+        get fftSize() {
+            return this.__fftSize;
+        }
+
+        set fftSize(value) {
+            const size = Math.round(Number(value) || 0);
+            if (size < 32 || size > 32768 || (size & (size - 1)) !== 0) {
+                throw new Error("fftSize must be a power of two between 32 and 32768");
+            }
+            this.__fftSize = size;
+            this.__smoothed = null;
+        }
+
+        get frequencyBinCount() {
+            return this.__fftSize >> 1;
+        }
+
+        __timeData() {
+            const data = new Float32Array(this.__fftSize);
+            if (audioBridge && typeof audioBridge.analyser === "function") {
+                try {
+                    audioBridge.analyser(data);
+                } catch (error) {
+                    reportError(error);
+                }
+            }
+            return data;
+        }
+
+        __frequencies() {
+            const data = this.__timeData();
+            const size = this.__fftSize;
+            const real = Float64Array.from(data);
+            const imag = new Float64Array(size);
+            for (let index = 0; index < size; index++) {
+                real[index] *= 0.5 - 0.5 * Math.cos(2 * Math.PI * index / size);
+            }
+            fftInPlace(real, imag);
+            const bins = this.frequencyBinCount;
+            const magnitudes = new Float32Array(bins);
+            const smoothing = Math.max(0, Math.min(1, Number(this.smoothingTimeConstant) || 0));
+            const previous = this.__smoothed;
+            for (let index = 0; index < bins; index++) {
+                const magnitude = Math.hypot(real[index], imag[index]);
+                magnitudes[index] = previous && previous.length === bins
+                    ? previous[index] * smoothing + magnitude * (1 - smoothing)
+                    : magnitude;
+            }
+            this.__smoothed = magnitudes;
+            const decibels = new Float32Array(bins);
+            for (let index = 0; index < bins; index++) {
+                decibels[index] = 20 * Math.log10(Math.max(1e-8, magnitudes[index]));
+            }
+            return decibels;
+        }
+
+        getFloatFrequencyData(array) {
+            const decibels = this.__frequencies();
+            array.set(decibels.subarray(0, Math.min(array.length, decibels.length)));
+        }
+
+        getByteFrequencyData(array) {
+            const decibels = this.__frequencies();
+            const min = Number(this.minDecibels);
+            const max = Number(this.maxDecibels);
+            const span = Math.max(1e-6, max - min);
+            for (let index = 0; index < Math.min(array.length, decibels.length); index++) {
+                array[index] = Math.max(0, Math.min(255, Math.round((decibels[index] - min) / span * 255)));
+            }
+        }
+
+        getFloatTimeDomainData(array) {
+            const data = this.__timeData();
+            array.set(data.subarray(0, Math.min(array.length, data.length)));
+        }
+
+        getByteTimeDomainData(array) {
+            const data = this.__timeData();
+            for (let index = 0; index < Math.min(array.length, data.length); index++) {
+                array[index] = Math.max(0, Math.min(255, Math.round((data[index] + 1) * 128)));
+            }
+        }
+    }
+
+    class PeriodicWave {
+        constructor(real, imag, options) {
+            const settings = options || {};
+            this.__real = Float32Array.from(real || []);
+            this.__imag = Float32Array.from(imag || []);
+            if (this.__real.length < 2 || this.__real.length !== this.__imag.length) {
+                throw new Error("PeriodicWave real and imaginary arrays must have the same length of at least 2");
+            }
+            this.__disableNormalization = Boolean(settings.disableNormalization);
+        }
+    }
+
+    function fftInPlace(real, imag) {
+        const length = real.length;
+        for (let index = 1, reverse = 0; index < length; index++) {
+            let bit = length >> 1;
+            for (; reverse & bit; bit >>= 1) reverse ^= bit;
+            reverse ^= bit;
+            if (index < reverse) {
+                [real[index], real[reverse]] = [real[reverse], real[index]];
+                [imag[index], imag[reverse]] = [imag[reverse], imag[index]];
+            }
+        }
+        for (let size = 2; size <= length; size <<= 1) {
+            const half = size >> 1;
+            const angle = -2 * Math.PI / size;
+            for (let start = 0; start < length; start += size) {
+                for (let offset = 0; offset < half; offset++) {
+                    const cosine = Math.cos(angle * offset);
+                    const sine = Math.sin(angle * offset);
+                    const even = start + offset;
+                    const odd = even + half;
+                    const oddReal = real[odd] * cosine - imag[odd] * sine;
+                    const oddImag = real[odd] * sine + imag[odd] * cosine;
+                    real[odd] = real[even] - oddReal;
+                    imag[odd] = imag[even] - oddImag;
+                    real[even] += oddReal;
+                    imag[even] += oddImag;
+                }
+            }
+        }
+    }
+
+    const MAX_RENDER_SECONDS = 30;
+
+    function graphNodeNeedsRender(node) {
+        return node instanceof BiquadFilterNode
+            || node instanceof DelayNode
+            || node instanceof WaveShaperNode
+            || node instanceof DynamicsCompressorNode
+            || node instanceof ConvolverNode
+            || node instanceof ChannelSplitterNode
+            || node instanceof ChannelMergerNode
+            || node instanceof IIRFilterNode
+            || node instanceof PannerNode;
+    }
+
+    function needsGraphRender(source) {
+        if (source instanceof MediaElementAudioSourceNode) return false;
+        if (source instanceof OscillatorNode || source instanceof ConstantSourceNode) return true;
+        let needed = false;
+        const visit = (node, visited) => {
+            if (!node || visited.has(node) || needed) return;
+            visited.add(node);
+            if (graphNodeNeedsRender(node)) {
+                needed = true;
+                return;
+            }
+            for (const edge of node.__edges) visit(edge.node, visited);
+        };
+        for (const edge of source.__edges) visit(edge.node, new Set());
+        return needed;
+    }
+
+    function graphOrder(source) {
+        const order = [];
+        const visiting = new Set();
+        const done = new Set();
+        const visit = (node) => {
+            if (done.has(node)) return;
+            if (visiting.has(node)) throw new Error("audio feedback loops are not supported by the native graph renderer");
+            visiting.add(node);
+            for (const edge of node.__edges) visit(edge.node);
+            visiting.delete(node);
+            done.add(node);
+            order.push(node);
+        };
+        visit(source);
+        return order.reverse();
+    }
+
+    function silenceBus(channels, length) {
+        return Array.from({ length: Math.max(1, channels) }, () => new Float32Array(length));
+    }
+
+    function sumInputBuses(buses, length, channels = 1) {
+        if (!buses || !buses.length) return silenceBus(channels, length);
+        let count = Math.max(1, channels);
+        for (const bus of buses) count = Math.max(count, bus.length);
+        const out = silenceBus(count, length);
+        for (const bus of buses) {
+            if (bus.length === 1 && count > 1) {
+                for (let index = 0; index < length; index++) {
+                    const sample = bus[0][index];
+                    for (let channel = 0; channel < count; channel++) out[channel][index] += sample;
+                }
+                continue;
+            }
+            for (let channel = 0; channel < Math.min(bus.length, count); channel++) {
+                const input = bus[channel];
+                const target = out[channel];
+                for (let index = 0; index < length; index++) target[index] += input[index];
+            }
+        }
+        return out;
+    }
+
+    function oscillatorSample(node, phase) {
+        const fraction = phase - Math.floor(phase);
+        if (node.type === "square") return fraction < 0.5 ? 1 : -1;
+        if (node.type === "sawtooth") return 2 * fraction - 1;
+        if (node.type === "triangle") return 1 - 4 * Math.abs(fraction - 0.5);
+        if (node.type === "custom") {
+            const wave = node.__periodicWave;
+            if (!wave) return 0;
+            let value = 0;
+            for (let harmonic = 1; harmonic < wave.__real.length; harmonic++) {
+                const angle = 2 * Math.PI * harmonic * fraction;
+                value += wave.__real[harmonic] * Math.cos(angle) + wave.__imag[harmonic] * Math.sin(angle);
+            }
+            return value;
+        }
+        return Math.sin(2 * Math.PI * fraction);
+    }
+
+    function renderSourceOutput(source, start, length, rate) {
+        if (source instanceof ConstantSourceNode) {
+            const output = new Float32Array(length);
+            for (let index = 0; index < length; index++) output[index] = source.offset.__valueAt(start + index / rate);
+            return [output];
+        }
+        if (source instanceof OscillatorNode) {
+            const output = new Float32Array(length);
+            let phase = 0;
+            for (let index = 0; index < length; index++) {
+                const time = start + index / rate;
+                output[index] = oscillatorSample(source, phase);
+                const frequency = Math.max(0, source.frequency.__valueAt(time));
+                phase += frequency * Math.pow(2, source.detune.__valueAt(time) / 1200) / rate;
+            }
+            return [output];
+        }
+        const buffer = source.buffer;
+        if (!buffer) return silenceBus(1, length);
+        const channels = Math.min(2, Math.max(1, buffer.numberOfChannels));
+        const inputs = [];
+        for (let channel = 0; channel < channels; channel++) inputs.push(buffer.getChannelData(channel));
+        const outputs = silenceBus(channels, length);
+        const loop = Boolean(source.loop);
+        const loopStart = Math.max(0, source.loopStart || 0) * rate;
+        const loopEnd = source.loopEnd > 0 ? Math.min(buffer.length, source.loopEnd * rate) : buffer.length;
+        let position = Math.max(0, source.__offset || 0) * rate;
+        for (let index = 0; index < length; index++) {
+            const time = start + index / rate;
+            const speed = Math.max(0, source.playbackRate.__valueAt(time)) * Math.pow(2, source.detune.__valueAt(time) / 1200);
+            if (loop && loopEnd > loopStart) {
+                const span = loopEnd - loopStart;
+                while (position >= loopEnd) position -= span;
+                while (position < loopStart) position += span;
+            }
+            if (position >= 0 && position < buffer.length) {
+                const frame = Math.floor(position);
+                for (let channel = 0; channel < channels; channel++) outputs[channel][index] = inputs[channel][frame] || 0;
+            }
+            position += speed;
+        }
+        return outputs;
+    }
+
+    function biquadCoefficients(node, time, rate) {
+        const frequency = Math.max(1, Math.min(rate * 0.499, node.frequency.__valueAt(time) * Math.pow(2, node.detune.__valueAt(time) / 1200)));
+        const omega = 2 * Math.PI * frequency / rate;
+        const cosine = Math.cos(omega);
+        const sine = Math.sin(omega);
+        const q = Math.max(0.0001, node.Q.__valueAt(time));
+        const alpha = sine / (2 * q);
+        const gain = node.gain.__valueAt(time);
+        const a = Math.pow(10, gain / 40);
+        let b0 = 1;
+        let b1 = 0;
+        let b2 = 0;
+        let a0 = 1;
+        let a1 = 0;
+        let a2 = 0;
+        if (node.type === "lowpass") {
+            b0 = (1 - cosine) / 2;
+            b1 = 1 - cosine;
+            b2 = b0;
+            a0 = 1 + alpha;
+            a1 = -2 * cosine;
+            a2 = 1 - alpha;
+        } else if (node.type === "highpass") {
+            b0 = (1 + cosine) / 2;
+            b1 = -1 - cosine;
+            b2 = b0;
+            a0 = 1 + alpha;
+            a1 = -2 * cosine;
+            a2 = 1 - alpha;
+        } else if (node.type === "bandpass") {
+            b0 = alpha;
+            b1 = 0;
+            b2 = -alpha;
+            a0 = 1 + alpha;
+            a1 = -2 * cosine;
+            a2 = 1 - alpha;
+        } else if (node.type === "notch") {
+            b0 = 1;
+            b1 = -2 * cosine;
+            b2 = 1;
+            a0 = 1 + alpha;
+            a1 = -2 * cosine;
+            a2 = 1 - alpha;
+        } else if (node.type === "allpass") {
+            b0 = 1 - alpha;
+            b1 = -2 * cosine;
+            b2 = 1 + alpha;
+            a0 = 1 + alpha;
+            a1 = -2 * cosine;
+            a2 = 1 - alpha;
+        } else if (node.type === "peaking") {
+            b0 = 1 + alpha * a;
+            b1 = -2 * cosine;
+            b2 = 1 - alpha * a;
+            a0 = 1 + alpha / a;
+            a1 = -2 * cosine;
+            a2 = 1 - alpha / a;
+        } else if (node.type === "lowshelf") {
+            const beta = 2 * Math.sqrt(a) * alpha;
+            b0 = a * ((a + 1) - (a - 1) * cosine + beta);
+            b1 = 2 * a * ((a - 1) - (a + 1) * cosine);
+            b2 = a * ((a + 1) - (a - 1) * cosine - beta);
+            a0 = (a + 1) + (a - 1) * cosine + beta;
+            a1 = -2 * ((a - 1) + (a + 1) * cosine);
+            a2 = (a + 1) + (a - 1) * cosine - beta;
+        } else if (node.type === "highshelf") {
+            const beta = 2 * Math.sqrt(a) * alpha;
+            b0 = a * ((a + 1) + (a - 1) * cosine + beta);
+            b1 = -2 * a * ((a - 1) + (a + 1) * cosine);
+            b2 = a * ((a + 1) + (a - 1) * cosine - beta);
+            a0 = (a + 1) - (a - 1) * cosine + beta;
+            a1 = 2 * ((a - 1) - (a + 1) * cosine);
+            a2 = (a + 1) - (a - 1) * cosine - beta;
+        } else {
+            throw new Error("unsupported native biquad type: " + node.type);
+        }
+        return [b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0];
+    }
+
+    function renderAudioNode(node, inputs, length, rate, start) {
+        const input = inputs[0] || silenceBus(1, length);
+        const channels = input.length;
+        if (node instanceof GainNode) {
+            const output = silenceBus(channels, length);
+            for (let channel = 0; channel < channels; channel++) {
+                for (let index = 0; index < length; index++) {
+                    output[channel][index] = input[channel][index] * node.gain.__valueAt(start + index / rate);
+                }
+            }
+            return [output];
+        }
+        if (node instanceof StereoPannerNode) {
+            const output = silenceBus(2, length);
+            for (let index = 0; index < length; index++) {
+                const pan = Math.max(-1, Math.min(1, node.pan.__valueAt(start + index / rate)));
+                const mono = channels === 1 ? input[0][index] : 0;
+                if (channels === 1) {
+                    const angle = (pan + 1) * Math.PI / 4;
+                    output[0][index] = mono * Math.cos(angle);
+                    output[1][index] = mono * Math.sin(angle);
+                } else {
+                    const left = input[0][index];
+                    const right = input[1][index];
+                    output[0][index] = pan <= 0 ? left : left * (1 - pan);
+                    output[1][index] = pan >= 0 ? right : right * (1 + pan);
+                }
+            }
+            return [output];
+        }
+        if (node instanceof BiquadFilterNode) {
+            const output = silenceBus(channels, length);
+            const states = Array.from({ length: channels }, () => [0, 0, 0, 0]);
+            for (let index = 0; index < length; index++) {
+                const [b0, b1, b2, a1, a2] = biquadCoefficients(node, start + index / rate, rate);
+                for (let channel = 0; channel < channels; channel++) {
+                    const state = states[channel];
+                    const sample = input[channel][index];
+                    const value = b0 * sample + b1 * state[0] + b2 * state[1] - a1 * state[2] - a2 * state[3];
+                    state[1] = state[0];
+                    state[0] = sample;
+                    state[3] = state[2];
+                    state[2] = value;
+                    output[channel][index] = value;
+                }
+            }
+            return [output];
+        }
+        if (node instanceof DelayNode) {
+            const output = silenceBus(channels, length);
+            const maxFrames = Math.max(2, Math.ceil(node.__maxDelayTime * rate) + 2);
+            const ring = Array.from({ length: channels }, () => new Float32Array(maxFrames));
+            let write = 0;
+            for (let index = 0; index < length; index++) {
+                const delay = Math.max(0, Math.min(node.__maxDelayTime, node.delayTime.__valueAt(start + index / rate))) * rate;
+                for (let channel = 0; channel < channels; channel++) {
+                    const state = ring[channel];
+                    if (delay <= 0) {
+                        output[channel][index] = input[channel][index];
+                    } else {
+                        const read = write - delay;
+                        const wrapped = ((read % maxFrames) + maxFrames) % maxFrames;
+                        const lower = Math.floor(wrapped);
+                        const upper = (lower + 1) % maxFrames;
+                        const fraction = wrapped - lower;
+                        output[channel][index] = state[lower] * (1 - fraction) + state[upper] * fraction;
+                    }
+                    state[write] = input[channel][index];
+                }
+                write = (write + 1) % maxFrames;
+            }
+            return [output];
+        }
+        if (node instanceof WaveShaperNode) {
+            const curve = node.__curve;
+            if (!curve || curve.length < 2) return [input];
+            const output = silenceBus(channels, length);
+            for (let channel = 0; channel < channels; channel++) {
+                for (let index = 0; index < length; index++) {
+                    const position = (Math.max(-1, Math.min(1, input[channel][index])) + 1) * 0.5 * (curve.length - 1);
+                    const lower = Math.floor(position);
+                    const upper = Math.min(curve.length - 1, lower + 1);
+                    const fraction = position - lower;
+                    output[channel][index] = curve[lower] * (1 - fraction) + curve[upper] * fraction;
+                }
+            }
+            return [output];
+        }
+        if (node instanceof DynamicsCompressorNode) {
+            const output = silenceBus(channels, length);
+            let envelope = 0;
+            let reduction = 0;
+            for (let index = 0; index < length; index++) {
+                const time = start + index / rate;
+                let level = 0;
+                for (let channel = 0; channel < channels; channel++) level = Math.max(level, Math.abs(input[channel][index]));
+                const inputDb = 20 * Math.log10(Math.max(1e-8, level));
+                const threshold = node.threshold.__valueAt(time);
+                const ratio = Math.max(1, node.ratio.__valueAt(time));
+                let target = 0;
+                if (inputDb > threshold) target = threshold + (inputDb - threshold) / ratio - inputDb;
+                const attack = Math.max(0.0001, node.attack.__valueAt(time));
+                const release = Math.max(0.0001, node.release.__valueAt(time));
+                const coefficient = target < envelope
+                    ? Math.exp(-1 / (attack * rate))
+                    : Math.exp(-1 / (release * rate));
+                envelope = coefficient * envelope + (1 - coefficient) * target;
+                reduction = Math.max(reduction, -envelope);
+                const gain = Math.pow(10, envelope / 20);
+                for (let channel = 0; channel < channels; channel++) output[channel][index] = input[channel][index] * gain;
+            }
+            node.reduction = reduction;
+            return [output];
+        }
+        if (node instanceof ConvolverNode) {
+            const impulse = node.buffer;
+            if (!impulse) return [silenceBus(channels, length)];
+            if (impulse.duration > 5) throw new RangeError("native convolver impulse responses are limited to 5 seconds");
+            const impulseChannels = Math.min(2, Math.max(1, impulse.numberOfChannels));
+            const ir = [];
+            let sum = 0;
+            for (let channel = 0; channel < impulseChannels; channel++) {
+                const data = impulse.getChannelData(channel);
+                ir.push(data);
+                for (let index = 0; index < data.length; index++) sum += data[index] * data[index];
+            }
+            const scale = node.normalize && sum > 0
+                ? 0.00125 / Math.sqrt(sum / Math.max(1, impulseChannels * impulse.length))
+                : 1;
+            const output = silenceBus(Math.max(channels, impulseChannels), length);
+            for (let channel = 0; channel < output.length; channel++) {
+                const inputChannel = input[Math.min(channel, channels - 1)];
+                const impulseChannel = ir[Math.min(channel, impulseChannels - 1)];
+                for (let index = 0; index < length; index++) {
+                    let value = 0;
+                    const count = Math.min(index + 1, impulseChannel.length);
+                    for (let tap = 0; tap < count; tap++) {
+                        value += inputChannel[index - tap] * impulseChannel[tap];
+                    }
+                    output[channel][index] = value * scale;
+                }
+            }
+            return [output];
+        }
+        if (node instanceof ChannelSplitterNode) {
+            const outputs = [];
+            for (let channel = 0; channel < node.numberOfOutputs; channel++) {
+                const output = new Float32Array(length);
+                if (channel < channels) output.set(input[channel]);
+                outputs.push([output]);
+            }
+            return outputs;
+        }
+        if (node instanceof ChannelMergerNode) {
+            const output = silenceBus(node.numberOfInputs, length);
+            for (let channel = 0; channel < node.numberOfInputs; channel++) {
+                const bus = inputs[channel] || silenceBus(1, length);
+                output[channel].set(bus[0]);
+            }
+            return [output];
+        }
+        if (node instanceof IIRFilterNode) {
+            const output = silenceBus(channels, length);
+            const feedforward = node.__feedforward;
+            const feedback = node.__feedback;
+            const history = Math.max(feedforward.length, feedback.length, 1);
+            for (let channel = 0; channel < channels; channel++) {
+                const x = new Float32Array(history);
+                const y = new Float32Array(history);
+                let position = 0;
+                for (let index = 0; index < length; index++) {
+                    x[position] = input[channel][index];
+                    let value = 0;
+                    for (let tap = 0; tap < feedforward.length; tap++) {
+                        value += feedforward[tap] * x[(position - tap + history) % history];
+                    }
+                    for (let tap = 1; tap < feedback.length; tap++) {
+                        value -= feedback[tap] * y[(position - tap + history) % history];
+                    }
+                    value /= feedback[0];
+                    y[position] = value;
+                    output[channel][index] = value;
+                    position = (position + 1) % history;
+                }
+            }
+            return [output];
+        }
+        if (node instanceof PannerNode) {
+            const output = silenceBus(2, length);
+            for (let index = 0; index < length; index++) {
+                const time = start + index / rate;
+                const x = node.positionX.__valueAt(time);
+                const y = node.positionY.__valueAt(time);
+                const z = node.positionZ.__valueAt(time);
+                const distance = Math.sqrt(x * x + y * y + z * z);
+                let gain = 1;
+                if (node.distanceModel === "linear") {
+                    const range = Math.max(1e-6, node.maxDistance - node.refDistance);
+                    gain = Math.max(0, 1 - node.rolloffFactor * (distance - node.refDistance) / range);
+                } else if (node.distanceModel === "exponential") {
+                    gain = Math.pow(Math.max(node.refDistance, distance) / node.refDistance, -node.rolloffFactor);
+                } else {
+                    gain = node.refDistance / (node.refDistance + node.rolloffFactor * Math.max(0, distance - node.refDistance));
+                }
+                const pan = Math.max(-1, Math.min(1, x / (Math.abs(x) + Math.abs(z) + 1)));
+                const mono = (channels === 1 ? input[0][index] : (input[0][index] + input[1][index]) * 0.5) * gain;
+                const angle = (pan + 1) * Math.PI / 4;
+                output[0][index] = mono * Math.cos(angle);
+                output[1][index] = mono * Math.sin(angle);
+            }
+            return [output];
+        }
+        if (node instanceof AnalyserNode) return [input];
+        return [input];
+    }
+
+    function renderGraph(source, start, duration) {
+        if (duration > MAX_RENDER_SECONDS) throw new RangeError("native audio graphs are limited to 30 seconds");
+        const rate = source.context.sampleRate;
+        const length = Math.max(1, Math.ceil(Math.max(0.001, duration) * rate - 1e-6));
+        const order = graphOrder(source);
+        const destination = order.find((node) => node.__isDestination);
+        if (!destination) return null;
+        const incoming = new Map();
+        for (const node of order) {
+            for (const edge of node.__edges) {
+                if (!incoming.has(edge.node)) incoming.set(edge.node, []);
+                incoming.get(edge.node).push({ from: node, output: edge.output, input: edge.input });
+            }
+        }
+        const outputs = new Map();
+        outputs.set(source, [renderSourceOutput(source, start, length, rate)]);
+        for (const node of order) {
+            if (node === source || node.__isDestination) continue;
+            const edges = incoming.get(node) || [];
+            const buses = new Map();
+            for (const edge of edges) {
+                const from = outputs.get(edge.from);
+                if (!from) continue;
+                if (!buses.has(edge.input)) buses.set(edge.input, []);
+                buses.get(edge.input).push(from[edge.output] || []);
+            }
+            const count = Math.max(1, ...Array.from(buses.keys()).map((index) => index + 1));
+            const inputs = [];
+            for (let index = 0; index < count; index++) inputs.push(sumInputBuses(buses.get(index) || [], length));
+            outputs.set(node, renderAudioNode(node, inputs, length, rate, start));
+        }
+        const edges = incoming.get(destination) || [];
+        const buses = [];
+        for (const edge of edges) {
+            const from = outputs.get(edge.from);
+            if (from) buses.push(from[edge.output] || []);
+        }
+        const mixed = sumInputBuses(buses, length, 2);
+        const rendered = source.context.createBuffer(2, length, rate);
+        rendered.getChannelData(0).set(mixed[0]);
+        rendered.getChannelData(1).set(mixed[1]);
         return rendered;
     }
 
@@ -2357,26 +3121,13 @@
             this.__stopped = false;
             this.__offset = 0;
             this.__startTime = Math.max(audioNow(), Number(when) || 0);
-            setTimeoutFn(() => {
-                const duration = this.__stopTime > this.__startTime ? this.__stopTime - this.__startTime : 2;
-                if (duration > 30) throw new RangeError("native oscillator notes are limited to 30 seconds");
-                this.__loop = this.__stopTime < 0;
-                const rate = this.context.sampleRate;
-                this.buffer = this.context.createBuffer(1, Math.max(1, Math.ceil(duration * rate)), rate);
-                const data = this.buffer.getChannelData(0);
-                let phase = 0;
-                for (let index = 0; index < data.length; index++) {
-                    const time = this.__startTime + index / rate;
-                    const fraction = phase % 1;
-                    if (this.type === "sine") data[index] = Math.sin(2 * Math.PI * fraction);
-                    else if (this.type === "square") data[index] = fraction < 0.5 ? 1 : -1;
-                    else if (this.type === "sawtooth") data[index] = 2 * fraction - 1;
-                    else if (this.type === "triangle") data[index] = 1 - 4 * Math.abs(fraction - 0.5);
-                    else throw new Error("unsupported native oscillator type: " + this.type);
-                    phase += Math.max(0, this.frequency.__valueAt(time)) * Math.pow(2, this.detune.__valueAt(time) / 1200) / rate;
-                }
-                this.__createVoice();
-            }, 0);
+            this.__loop = this.__stopTime < 0;
+            setTimeoutFn(() => this.__createVoice(), 0);
+        }
+
+        setPeriodicWave(wave) {
+            this.__periodicWave = wave;
+            this.type = "custom";
         }
     }
 
@@ -2946,6 +3697,50 @@
 
         createBiquadFilter() {
             return new BiquadFilterNode(this);
+        }
+
+        createDelay(maxDelayTime = 1) {
+            return new DelayNode(this, maxDelayTime);
+        }
+
+        createWaveShaper() {
+            return new WaveShaperNode(this);
+        }
+
+        createDynamicsCompressor() {
+            return new DynamicsCompressorNode(this);
+        }
+
+        createConvolver() {
+            return new ConvolverNode(this);
+        }
+
+        createChannelSplitter(numberOfOutputs = 6) {
+            return new ChannelSplitterNode(this, numberOfOutputs);
+        }
+
+        createChannelMerger(numberOfInputs = 6) {
+            return new ChannelMergerNode(this, numberOfInputs);
+        }
+
+        createIIRFilter(feedforward, feedback) {
+            return new IIRFilterNode(this, feedforward, feedback);
+        }
+
+        createPanner() {
+            return new PannerNode(this);
+        }
+
+        createConstantSource() {
+            return new ConstantSourceNode(this);
+        }
+
+        createAnalyser() {
+            return new AnalyserNode(this);
+        }
+
+        createPeriodicWave(real, imag, constraints) {
+            return new PeriodicWave(real, imag, constraints);
         }
 
         createMediaElementSource(element) {
@@ -4743,6 +5538,17 @@
     define("AudioBufferSourceNode", AudioBufferSourceNode);
     define("OscillatorNode", OscillatorNode);
     define("BiquadFilterNode", BiquadFilterNode);
+    define("DelayNode", DelayNode);
+    define("WaveShaperNode", WaveShaperNode);
+    define("DynamicsCompressorNode", DynamicsCompressorNode);
+    define("ConvolverNode", ConvolverNode);
+    define("ChannelSplitterNode", ChannelSplitterNode);
+    define("ChannelMergerNode", ChannelMergerNode);
+    define("IIRFilterNode", IIRFilterNode);
+    define("PannerNode", PannerNode);
+    define("ConstantSourceNode", ConstantSourceNode);
+    define("AnalyserNode", AnalyserNode);
+    define("PeriodicWave", PeriodicWave);
     define("MediaElementAudioSourceNode", MediaElementAudioSourceNode);
     global.webkitAudioContext = AudioContext;
     define("ResizeObserver", ResizeObserver);

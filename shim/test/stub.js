@@ -27,6 +27,7 @@ export function installStub() {
         time: 0,
         storage: new Map(),
         gamepads: [],
+        analyser: [],
         nextId: 1,
         nextCanvas: 1,
     };
@@ -252,6 +253,10 @@ export function installStub() {
                 out[1] = buffer.channels;
                 out[2] = buffer.frames;
                 return true;
+            },
+            analyser: (out) => {
+                out.set(state.analyser.slice(Math.max(0, state.analyser.length - out.length)));
+                return out.length;
             },
             readChannel: (id, channel, out) => {
                 const buffer = audioBuffers.get(id);

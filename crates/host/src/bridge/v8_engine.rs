@@ -931,6 +931,7 @@ fn install_audio(scope: &PinScope<'_, '_>, native: Local<v8::Object>, data: Loca
     register(scope, object, "uploadBuffer", audio_upload_buffer, data);
     register(scope, object, "bufferInfo", audio_buffer_info, data);
     register(scope, object, "readChannel", audio_read_channel, data);
+    register(scope, object, "analyser", audio_analyser, data);
     register(scope, object, "freeBuffer", audio_free_buffer, data);
     register(scope, object, "play", audio_play, data);
     register(scope, object, "setGain", audio_set_gain, data);
@@ -1033,6 +1034,14 @@ fn audio_read_channel<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut 
         return rv.set_int32(-1);
     };
     rv.set_int32(count);
+}
+
+fn audio_analyser<'s, 'i>(_scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
+    let Some(audio) = host(&args).audio.as_ref() else {
+        return rv.set_uint32(0);
+    };
+    let count = with_f32_mut(args.get(0), |out| audio.read_analyser(out)).unwrap_or(0);
+    rv.set_uint32(count as u32);
 }
 
 fn audio_free_buffer<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv: Rv<'s>) {
