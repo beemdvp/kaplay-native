@@ -90,7 +90,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
-            libxi-dev libxcursor-dev libxrandr-dev libgl1-mesa-dev libxkbcommon-x11-0 \
+            libxi-dev libxcursor-dev libxrandr-dev libgl1-mesa-dev libxkbcommon-x11-0 libudev-dev \
             xvfb lld
       - name: Install the Mesa software renderer
         if: runner.os == 'Windows'

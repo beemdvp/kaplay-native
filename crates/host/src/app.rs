@@ -358,6 +358,21 @@ impl Inner {
         self.drain();
     }
 
+    fn pump_gamepads(&self) {
+        for event in self.state.pump_gamepads() {
+            match event {
+                crate::gamepad::GamepadEvent::Connected(snapshot) => {
+                    let payload =
+                        serde_json::to_value(&snapshot).unwrap_or(serde_json::Value::Null);
+                    self.dispatch("gamepadconnected", payload);
+                }
+                crate::gamepad::GamepadEvent::Disconnected { index, id } => {
+                    self.dispatch("gamepaddisconnected", json!({ "index": index, "id": id }));
+                }
+            }
+        }
+    }
+
     fn dispatch_resize(&self, size: winit::dpi::PhysicalSize<u32>) {
         self.last_resize.set((size.width, size.height));
         if let (Some(width), Some(height)) =
@@ -384,6 +399,7 @@ impl Inner {
         if self.last_resize.get() != (size.width, size.height) {
             self.dispatch_resize(size);
         }
+        self.pump_gamepads();
         let network_start = std::time::Instant::now();
         self.pump_network();
         self.pump_auth();
@@ -711,6 +727,7 @@ impl HostApp {
             game_name: self.config.game_name.clone(),
             steam: self.steam.clone(),
             updates: self.config.updates.clone(),
+            gamepads: std::cell::RefCell::new(crate::gamepad::Gamepads::new()),
         });
 
         if self.config.fullscreen {

@@ -43,6 +43,7 @@ pub fn install<'js>(ctx: &Ctx<'js>, state: Rc<HostState>, shim: &str) -> rquickj
     install_auth(ctx, &native, &state)?;
     install_audio(ctx, &native, &state)?;
     install_video(ctx, &native, &state)?;
+    install_gamepad(ctx, &native, &state)?;
     install_steam(ctx, &native, &state)?;
     install_updates(ctx, &native, &state)?;
     ctx.globals().set("__kapNative", native)?;
@@ -1172,6 +1173,21 @@ fn video_info<'js>(context: Ctx<'js>, info: &VideoInfo) -> Option<Object<'js>> {
     value.set("height", info.height).ok()?;
     value.set("duration", info.duration).ok()?;
     Some(value)
+}
+
+fn install_gamepad<'js>(
+    ctx: &Ctx<'js>,
+    native: &Object<'js>,
+    state: &Rc<HostState>,
+) -> rquickjs::Result<()> {
+    let object = Object::new(ctx.clone())?;
+    let state = state.clone();
+    object.set(
+        "list",
+        Function::new(ctx.clone(), move || -> String { state.gamepad_json() })?,
+    )?;
+    native.set("gamepad", object)?;
+    Ok(())
 }
 
 fn install_steam<'js>(

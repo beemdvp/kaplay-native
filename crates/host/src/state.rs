@@ -15,6 +15,8 @@ use kaplay_native_steam::SteamApi;
 use kaplay_native_video::Video;
 use winit::window::Window;
 
+use crate::gamepad::{GamepadEvent, Gamepads};
+
 pub struct ImageData {
     pub width: u32,
     pub height: u32,
@@ -60,11 +62,20 @@ pub struct HostState {
     pub game_name: String,
     pub steam: Rc<RefCell<Option<SteamApi>>>,
     pub updates: Arc<crate::updates::UpdateState>,
+    pub gamepads: RefCell<Gamepads>,
 }
 
 impl HostState {
     pub fn now_ms(&self) -> f64 {
         self.start.elapsed().as_secs_f64() * 1000.0
+    }
+
+    pub fn pump_gamepads(&self) -> Vec<GamepadEvent> {
+        self.gamepads.borrow_mut().pump(self.now_ms())
+    }
+
+    pub fn gamepad_json(&self) -> String {
+        self.gamepads.borrow().json()
     }
 
     pub fn store_image(&self, width: u32, height: u32, pixels: Vec<u8>) -> u32 {

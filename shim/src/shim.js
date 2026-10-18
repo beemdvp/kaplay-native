@@ -3311,6 +3311,18 @@
             case "wheel":
                 dispatchWheel(payload);
                 break;
+            case "gamepadconnected": {
+                const event = makeEvent("gamepadconnected", payload);
+                event.gamepad = gamepadFromSnapshot(payload);
+                windowListeners.emit(event);
+                break;
+            }
+            case "gamepaddisconnected": {
+                const event = makeEvent("gamepaddisconnected", payload);
+                event.gamepad = disconnectGamepad(payload);
+                windowListeners.emit(event);
+                break;
+            }
             default:
                 break;
         }
@@ -3937,12 +3949,83 @@
         },
     });
 
+    const gamepadObjects = new Map();
+
+    class Gamepad {
+        constructor(data) {
+            this.hapticActuators = [];
+            this.vibrationActuator = null;
+            this.__update(data || {});
+        }
+
+        __update(data) {
+            this.id = String(data.id || "");
+            this.index = Number(data.index) || 0;
+            this.connected = data.connected !== false;
+            this.mapping = String(data.mapping || "standard");
+            this.timestamp = Number(data.timestamp) || 0;
+            this.axes = Array.from(data.axes || [], (value) => Number(value) || 0);
+            this.buttons = Array.from(data.buttons || [], (button) => ({
+                pressed: Boolean(button && button.pressed),
+                touched: Boolean(button && button.touched),
+                value: Number(button && button.value) || 0,
+            }));
+        }
+    }
+
+    function gamepadFromSnapshot(data) {
+        const index = Number(data.index) || 0;
+        let gamepad = gamepadObjects.get(index);
+        if (!gamepad) {
+            gamepad = new Gamepad(data);
+            gamepadObjects.set(index, gamepad);
+        } else {
+            gamepad.__update(data);
+        }
+        return gamepad;
+    }
+
+    function nativeGamepads() {
+        if (!native.gamepad || typeof native.gamepad.list !== "function") return [];
+        try {
+            const list = JSON.parse(native.gamepad.list());
+            return Array.isArray(list) ? list : [];
+        } catch (error) {
+            reportError(error);
+            return [];
+        }
+    }
+
+    function gamepadsArray() {
+        const gamepads = [];
+        for (const data of nativeGamepads()) {
+            const gamepad = gamepadFromSnapshot(data);
+            gamepads[gamepad.index] = gamepad;
+        }
+        for (let index = 0; index < gamepads.length; index++) {
+            if (!(index in gamepads)) gamepads[index] = null;
+        }
+        return gamepads;
+    }
+
+    function disconnectGamepad(payload) {
+        const index = Number(payload.index) || 0;
+        const gamepad = gamepadObjects.get(index) || new Gamepad({
+            id: payload.id,
+            index,
+            connected: false,
+        });
+        gamepad.connected = false;
+        gamepadObjects.delete(index);
+        return gamepad;
+    }
+
     const navigator = {
         userAgent: "kaplay-native",
         platform: native.env.platform,
         language: "en-US",
         getGamepads() {
-            return [];
+            return gamepadsArray();
         },
         maxTouchPoints: 0,
         onLine: true,
@@ -4625,6 +4708,7 @@
     define("localStorage", localStorage);
     define("Image", Image);
     define("ImageData", ImageData);
+    define("Gamepad", Gamepad);
     define("Blob", Blob);
     define("Headers", Headers);
     define("WebSocket", WebSocket);
