@@ -1,6 +1,6 @@
 {
     "name": "kaplay-native",
-    "version": "0.1.0-alpha.11",
+    "version": "0.1.0-alpha.10",
     "description": "Run and package KAPLAY games as native desktop applications with Steam support",
     "type": "module",
     "repository": {
@@ -20,9 +20,5 @@
     "license": "MIT",
     "engines": {
         "node": ">=20"
-    },
-    "dependencies": {
-        "pngjs": "^7.0.0",
-        "resedit": "^3.1.0"
     }
 }

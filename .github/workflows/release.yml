@@ -174,9 +174,6 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-      - name: Install the CLI dependencies
-        run: npm ci
-        working-directory: cli
       - name: Download and run the released host
         env:
           KAPLAY_NATIVE_CACHE: ${{ runner.temp }}/kaplay-native-cache
