@@ -20,6 +20,7 @@ pub struct PackConfig {
     pub url: Option<String>,
     pub game_id: Option<String>,
     pub content_version: Option<String>,
+    pub icon: Option<String>,
     pub update: Option<UpdateSettings>,
 }
 
@@ -129,6 +130,15 @@ mod tests {
         assert_eq!(embedded.pak, b"pak bytes");
         assert!(embedded.config.js_engine.is_none());
         assert!(embedded.config.title.is_none());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn reads_an_icon_config() {
+        let path = std::env::temp_dir().join(format!("kap-embed-icon-{}", std::process::id()));
+        write_embedded(&path, b"pak bytes", r#"{"icon":"aWNvbg=="}"#);
+        let embedded = read(&path).unwrap();
+        assert_eq!(embedded.config.icon.as_deref(), Some("aWNvbg=="));
         std::fs::remove_file(&path).ok();
     }
 

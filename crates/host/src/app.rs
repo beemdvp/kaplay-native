@@ -34,6 +34,24 @@ const SHIM: &str = include_str!("../../../shim/src/shim.js");
 const DEFAULT_FONT: &[u8] = include_bytes!("../../../assets/fonts/DejaVuSansMono.ttf");
 const FRAME_SAMPLES: usize = 10_000;
 
+fn window_icon(bytes: &[u8]) -> Option<winit::window::Icon> {
+    let image = match image::load_from_memory(bytes) {
+        Ok(image) => image.to_rgba8(),
+        Err(error) => {
+            log::warn!("packed window icon could not be decoded: {error}");
+            return None;
+        }
+    };
+    let (width, height) = image.dimensions();
+    match winit::window::Icon::from_rgba(image.into_raw(), width, height) {
+        Ok(icon) => Some(icon),
+        Err(error) => {
+            log::warn!("packed window icon is invalid: {error}");
+            None
+        }
+    }
+}
+
 fn percentile(sorted: &[f32], fraction: f32) -> f32 {
     if sorted.is_empty() {
         return 0.0;
@@ -593,13 +611,22 @@ impl HostApp {
                 Err(error) => log::warn!("steam unavailable: {error}"),
             }
         }
-        let attributes = Window::default_attributes()
+        let mut attributes = Window::default_attributes()
             .with_title(self.config.game_name.clone())
             .with_inner_size(winit::dpi::LogicalSize::new(
                 self.config.window.0 as f64,
                 self.config.window.1 as f64,
             ))
             .with_visible(!self.config.headless);
+        #[cfg(target_os = "linux")]
+        {
+            use winit::platform::wayland::WindowAttributesExtWayland;
+            attributes =
+                attributes.with_name(self.config.app_name.clone(), self.config.app_name.clone());
+        }
+        if let Some(bytes) = self.config.icon.as_deref() {
+            attributes = attributes.with_window_icon(window_icon(bytes));
+        }
 
         let template = ConfigTemplateBuilder::new()
             .with_alpha_size(8)
@@ -1102,7 +1129,19 @@ impl ApplicationHandler for HostApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_module_entry, frame_stats, percentile};
+    use super::{find_module_entry, frame_stats, percentile, window_icon};
+
+    #[test]
+    fn decodes_a_packed_png_icon() {
+        const PNG: &[u8] = &[
+            137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 2,
+            8, 6, 0, 0, 0, 114, 182, 13, 36, 0, 0, 0, 17, 73, 68, 65, 84, 120, 1, 99, 252, 15, 4,
+            12, 64, 192, 196, 0, 5, 0, 61, 248, 4, 0, 54, 24, 75, 180, 0, 0, 0, 0, 73, 69, 78, 68,
+            174, 66, 96, 130,
+        ];
+        assert!(window_icon(PNG).is_some());
+        assert!(window_icon(b"not a png").is_none());
+    }
 
     #[test]
     fn percentiles_land_on_expected_samples() {

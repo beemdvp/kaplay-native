@@ -26,6 +26,9 @@ pub struct HostConfig {
     pub frame_trace: Option<PathBuf>,
     pub save_dir: PathBuf,
     pub game_name: String,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub app_name: String,
+    pub icon: Option<Vec<u8>>,
     pub url: Option<String>,
     pub js_engine: JsEngine,
     pub updates: Arc<UpdateState>,
