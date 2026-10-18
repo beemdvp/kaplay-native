@@ -63,7 +63,8 @@ and the remaining jobs still run.
 - `font` - register font bytes, query families
 - `canvas` - Canvas 2D operations against a native surface id
 - `gl` - WebGL 1 operations against a GL state handle table
-- `audio` - buffers, voices, mixer parameters, decode jobs, and playback clock
+- `audio` - buffers, voices, mixer parameters, decode jobs, playback clock, and
+  the master analyser tap
 - `video` - MP4 decoding and frame uploads
 - `gamepad` - standard-mapped snapshots (`list() -> JSON`)
 - `steam` - Steamworks user, achievements, stats, cloud
@@ -148,6 +149,12 @@ shim rejects immediately with a `TypeError`.
   mixer renders stereo blocks with linear interpolation for resampling and a
   constant-power pan law, and reports finished voices as events so `onended`
   fires.
+- **Web Audio graph** nodes that need sample processing (filters, delay,
+  waveshaping, compression, convolution, IIR, panners, channel routing,
+  constant sources, custom periodic waves) are rendered to PCM in the shim when
+  a source starts. Plain gain/pan chains still use live native voices. The
+  mixer also writes a mono master tap into a 32k-frame ring that backs
+  `AnalyserNode`.
 - **Output** is ALSA (loaded dynamically, so no build-time dependency) on Linux,
   WASAPI through `cpal` on Windows, and CoreAudio through `cpal` on macOS. The
   output format is negotiated once; if the device cannot be opened, the host

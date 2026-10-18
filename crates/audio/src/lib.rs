@@ -25,9 +25,41 @@ pub enum AudioEvent {
 }
 
 pub const BLOCK_FRAMES: usize = 512;
+const ANALYSER_FRAMES: usize = 32768;
+
+struct AnalyserTap {
+    samples: Vec<f32>,
+    write: usize,
+}
+
+impl AnalyserTap {
+    fn new() -> Self {
+        Self {
+            samples: vec![0.0; ANALYSER_FRAMES],
+            write: 0,
+        }
+    }
+
+    fn push(&mut self, out: &[f32]) {
+        for frame in out.as_chunks::<2>().0 {
+            self.samples[self.write] = (frame[0] + frame[1]) * 0.5;
+            self.write = (self.write + 1) % self.samples.len();
+        }
+    }
+
+    fn read(&self, out: &mut [f32]) -> usize {
+        let count = out.len().min(self.samples.len());
+        let start = (self.write + self.samples.len() - count) % self.samples.len();
+        for (index, sample) in out[..count].iter_mut().enumerate() {
+            *sample = self.samples[(start + index) % self.samples.len()];
+        }
+        count
+    }
+}
 
 pub struct Engine {
     mixer: Mutex<mixer::Mixer>,
+    analyser: Mutex<AnalyserTap>,
     events: Mutex<Vec<AudioEvent>>,
     clock: AtomicU64,
     sample_rate: u32,
@@ -40,6 +72,7 @@ impl Engine {
     pub fn new(sample_rate: u32) -> Self {
         Self {
             mixer: Mutex::new(mixer::Mixer::new(sample_rate)),
+            analyser: Mutex::new(AnalyserTap::new()),
             events: Mutex::new(Vec::new()),
             clock: AtomicU64::new(0),
             sample_rate: sample_rate.max(1),
@@ -130,6 +163,7 @@ impl Engine {
         };
         self.clock
             .fetch_add((out.len() / 2) as u64, Ordering::Relaxed);
+        self.tap_analyser(out);
         if !finished.is_empty() {
             if let Ok(mut events) = self.events.lock() {
                 events.extend(
@@ -143,6 +177,18 @@ impl Engine {
 
     fn with_mixer<T>(&self, f: impl FnOnce(&mut mixer::Mixer) -> T) -> Option<T> {
         self.mixer.lock().ok().map(|mut mixer| f(&mut mixer))
+    }
+
+    fn tap_analyser(&self, out: &[f32]) {
+        if let Ok(mut analyser) = self.analyser.lock() {
+            analyser.push(out);
+        }
+    }
+
+    fn read_analyser(&self, out: &mut [f32]) -> usize {
+        self.analyser
+            .lock()
+            .map_or(0, |analyser| analyser.read(out))
     }
 }
 
@@ -276,6 +322,10 @@ impl Audio {
 
     pub fn take_events(&self) -> Vec<AudioEvent> {
         self.shared.engine.take_events()
+    }
+
+    pub fn read_analyser(&self, out: &mut [f32]) -> usize {
+        self.shared.engine.read_analyser(out)
     }
 
     pub fn decode_async(&self, request: u32, bytes: Arc<[u8]>) {
@@ -413,5 +463,20 @@ impl Audio {
 impl Default for Audio {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn analyser_tap_returns_the_latest_mono_frames() {
+        let engine = Engine::new(48_000);
+        engine.tap_analyser(&[0.1, 0.3, 0.5, 0.5, -0.2, -0.2]);
+        let mut out = [0.0; 2];
+        assert_eq!(engine.read_analyser(&mut out), 2);
+        assert!((out[0] - 0.5).abs() < 1e-6);
+        assert!((out[1] + 0.2).abs() < 1e-6);
     }
 }

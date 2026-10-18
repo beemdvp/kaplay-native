@@ -165,17 +165,30 @@ returns `NO_ERROR`, and `isContextLost` returns `false`.
 - `localStorage` is persisted as JSON in the platform data directory
   (`--save-dir` overrides it) and written atomically.
 - `AudioContext`, `AudioBuffer`, `AudioBufferSourceNode`, `GainNode`,
-  `StereoPannerNode`, `OscillatorNode`, `BiquadFilterNode`,
-  `MediaElementAudioSourceNode`, and `AudioParam` cover the
-  Web Audio surface KAPLAY uses. `start(when, offset, duration)`, `stop`,
-  `loop`, `playbackRate`, `detune`, `pan`, `gain` (including
-  `setValueAtTime`/`linearRampToValueAtTime`/`exponentialRampToValueAtTime`),
-  `connect`/`disconnect`, and `onended` all work.
-- `OscillatorNode` (sine, square, sawtooth, triangle) and `BiquadFilterNode`
-  (lowpass, highpass, bandpass, notch) render a note to PCM when playback
-  starts, with frequency, detune, Q, and gain automation evaluated over the
-  note. Rendered notes are limited to 30 seconds, and filter changes after
-  playback starts are not applied to that note.
+  `StereoPannerNode`, `OscillatorNode`, `BiquadFilterNode`, `DelayNode`,
+  `WaveShaperNode`, `DynamicsCompressorNode`, `ConvolverNode`,
+  `ChannelSplitterNode`, `ChannelMergerNode`, `IIRFilterNode`, `PannerNode`,
+  `ConstantSourceNode`, `AnalyserNode`, `PeriodicWave`,
+  `MediaElementAudioSourceNode`, and `AudioParam`. `start(when, offset,
+  duration)`, `stop`, `loop`, `loopStart`/`loopEnd`, `playbackRate`, `detune`,
+  `pan`, `gain`, `delayTime`, `offset`, source positions,
+  `setValueAtTime`/`linearRampToValueAtTime`/`exponentialRampToValueAtTime`,
+  `connect(node, output, input)`/`disconnect`, `onended`, and
+  `getChannelData`/`copyFromChannel`/`copyToChannel` work.
+- Sources and effect chains that need sample processing render to PCM when
+  playback starts. `OscillatorNode` supports sine, square, sawtooth, triangle,
+  and custom `PeriodicWave`; `BiquadFilterNode` supports lowpass, highpass,
+  bandpass, notch, allpass, peaking, lowshelf, and highshelf. Delay,
+  waveshaping, dynamics compression, convolution, IIR filtering, panning,
+  channel split/merge, and constant sources are evaluated over the rendered
+  note with automation. Rendered notes are limited to 30 seconds, convolution
+  impulse responses to 5 seconds, and feedback loops through a `DelayNode` are
+  rejected. Parameter changes made after a rendered voice starts are not
+  applied to that voice; construct and connect the graph before `start()`.
+- `AnalyserNode` reads the mixed master output through the native audio engine
+  (`fftSize` from 32 to 32768, time-domain and frequency-domain byte/float
+  data, smoothing, and dB range). The analyser is a master tap, not a tap at
+  its position in the graph.
 - `HTMLAudioElement` (`new Audio(url)`) plays music through the same mixer:
   `play`, `pause`, `currentTime`, `duration`, `volume`, `playbackRate`, `loop`,
   and `onended`.
@@ -196,11 +209,45 @@ returns `NO_ERROR`, and `isContextLost` returns `false`.
   `navigator.mediaCapabilities.decodingInfo` report MP4 support only.
 - Decoding supports WAV, MP3, FLAC, Ogg Vorbis, Opus, and the AAC track of an
   MP4, from bundled files, data URLs, and HTTP(S) URLs.
-- `AudioWorklet`, `AnalyserNode`, `AudioContext.createMediaStreamSource`, and
-  `record()`/`MediaRecorder` are not implemented. Without an audio device the
-  engine runs silently and playback still advances in real time.
+- `AudioWorklet`, `ScriptProcessorNode`, `AudioContext.createMediaStreamSource`,
+  `createMediaStreamDestination`, and `record()`/`MediaRecorder` are not
+  implemented; see [Web Audio limitations](#web-audio-limitations).
+- Without an audio device the engine runs silently and playback still advances
+  in real time.
 - Touch events are not delivered from native input yet, so `isTouchscreen()`
   reports false.
+
+## Web Audio limitations
+
+The shim renders effect graphs to PCM when a source starts; it does not run a
+real-time JavaScript audio graph or a capture pipeline. The remaining APIs need
+subsystems that do not exist yet:
+
+- `AudioWorklet` runs JavaScript DSP on the audio thread in 128-frame render
+  quanta. QuickJS and V8 run on the main thread, while `crates/audio` renders on
+  the ALSA thread or the `cpal` callback. A compliant implementation needs a
+  separate worker JS runtime, `registerProcessor`, message ports, parameter
+  descriptors, and real-time render-quantum scheduling; invoking the main
+  runtime from the mixer callback is not thread-safe and would risk dropouts.
+- `ScriptProcessorNode` invokes `onaudioprocess` repeatedly during playback
+  with streaming input and output buffers. The current graph renderer produces
+  a complete PCM buffer before playback and the native mixer has no streaming
+  PCM bridge. Supporting it needs ring buffers, periodic JS callbacks, input
+  and output buffer assembly, and underrun handling. It is also deprecated in
+  favor of `AudioWorklet`.
+- `MediaStreamAudioSourceNode` / `AudioContext.createMediaStreamSource` needs
+  microphone or system capture, device enumeration, permissions, and
+  platform-specific capture backends. The engine has audio output and a master
+  analyser tap, but no capture path.
+- `MediaStreamAudioDestinationNode` / `createMediaStreamDestination`,
+  `MediaRecorder`, and `record()` need graph output routed into a live stream,
+  plus canvas `captureStream`, an encoder, and a muxer. The master analyser tap
+  cannot substitute for a node-local stream and would not make recording work.
+
+The offline renderer also has explicit limits: rendered sources are capped at 30
+seconds, convolution impulse responses at 5 seconds, `DelayNode` feedback loops
+are rejected, and parameter changes after playback starts do not affect a
+rendered voice. Construct and connect the graph before calling `start()`.
 
 ## Platforms
 

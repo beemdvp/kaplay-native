@@ -38,8 +38,9 @@ for the manual validation checklist.
   events
 - Network: `fetch` (HTTP/HTTPS) and `WebSocket` (ws/wss) on background threads
 - Audio: Web Audio nodes over a native software mixer, plus `HTMLAudioElement`
-  music, decoding WAV, MP3, FLAC, Ogg Vorbis, and Opus; `OscillatorNode` and
-  `BiquadFilterNode` render short synthesized notes
+  music, decoding WAV, MP3, FLAC, Ogg Vorbis, and Opus; filters, delays,
+  waveshaping, compression, convolution, panners, channel routing, custom
+  periodic waves, and master-output analysis render offline per source
 - Video: `HTMLVideoElement` over a threaded, pure-Rust H.264 MP4 decoder,
   drawn with `gl.texImage2D` (the path KAPLAY's `video()` component uses)
 - Assets: directory or `.pak` archives, plus remote images and fonts with
@@ -205,11 +206,29 @@ the Vite dev server.
 ## Audio
 
 Sound plays through a native software mixer. The shim implements the Web Audio
-surface KAPLAY uses (`AudioContext`, `AudioBuffer`, `AudioBufferSourceNode`,
-`GainNode`, `StereoPannerNode`, `MediaElementAudioSourceNode`, `AudioParam`)
-and `HTMLAudioElement` for `playMusic`, all routed through the same engine:
+surface KAPLAY uses plus the wider node graph: `AudioContext`, `AudioBuffer`,
+`AudioBufferSourceNode`, `GainNode`, `StereoPannerNode`, `OscillatorNode`,
+`BiquadFilterNode`, `DelayNode`, `WaveShaperNode`,
+`DynamicsCompressorNode`, `ConvolverNode`, `ChannelSplitterNode`,
+`ChannelMergerNode`, `IIRFilterNode`, `PannerNode`, `ConstantSourceNode`,
+`AnalyserNode`, `PeriodicWave`, `MediaElementAudioSourceNode`, and
+`AudioParam`, plus `HTMLAudioElement` for `playMusic`, all routed through the
+same engine:
 
 - Decoding: WAV, MP3, FLAC, Ogg Vorbis, and Opus, done on background threads.
+- Graphs that need sample processing render to PCM when a source starts, so
+  filter, delay, wave-shaping, compression, convolution, panner, channel
+  routing, constant-source, and custom-waveform parameters are evaluated with
+  automation. Rendered notes are limited to 30 seconds (5 seconds for a
+  convolution impulse response), feedback loops through `DelayNode` are
+  rejected, and parameter changes after playback starts do not affect the
+  rendered voice.
+- `AnalyserNode` reads time-domain and frequency-domain data from the mixed
+  master output.
+- `AudioWorklet`, `ScriptProcessorNode`, `MediaStream` sources/destinations,
+  and `record()`/`MediaRecorder` are not implemented. See
+  [Web Audio limitations](docs/compatibility.md#web-audio-limitations) for why
+  they need real-time JS, streaming PCM, or capture/encoding infrastructure.
 - Output: ALSA on Linux, WASAPI on Windows, CoreAudio on macOS. If no device is
   available the game keeps running silently and `currentTime` still advances, so
   sounds still start and end.

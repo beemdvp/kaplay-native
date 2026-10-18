@@ -253,8 +253,12 @@ quickjs baseline figures; current baselines live in `benchmarks/README.md`):
   occupy a worker instead of the load path.
 - Input events serialize JSON for every key/mouse event before entering the
   shim.
-- The shim re-walks the Web Audio node graph for every live voice on every
-  frame (`graphParams` allocates a stack and a `Set` per voice).
+- The shim re-walks the Web Audio node graph for every live native voice on
+  every frame (`graphParams` allocates a stack and a `Set` per voice). Graphs
+  with effects that need sample processing are rendered once when the source
+  starts; the tradeoff is a one-time CPU and buffer cost instead of live
+  parameter updates. The analyser tap copies one mono sample per mixed frame
+  into a 32k-frame ring buffer.
 
 ## How to measure
 

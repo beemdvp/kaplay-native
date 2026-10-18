@@ -1107,6 +1107,21 @@ fn install_audio<'js>(
             })?,
         )?;
     }
+    {
+        let state = state.clone();
+        object.set(
+            "analyser",
+            Function::new(ctx.clone(), move |mut out: TypedArray<f32>| -> u32 {
+                let Some(audio) = state.audio.as_ref() else {
+                    return 0;
+                };
+                let Some(out) = slice_f32_mut(&mut out) else {
+                    return 0;
+                };
+                audio.read_analyser(out) as u32
+            })?,
+        )?;
+    }
     native.set("audio", object)?;
     Ok(())
 }
