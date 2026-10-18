@@ -17,6 +17,8 @@ executable for the current platform with the game assets and defaults embedded,
 so players need nothing else. The CLI downloads the matching native host from
 GitHub releases on first use and caches it. Pass `--icon logo.png` to set the
 window icon, add a Windows executable icon, and write the macOS `.icns` sidecar.
+On Linux, a packed game with `--icon` installs a `.desktop` entry and hicolor
+icon on first launch; `--comment` sets the menu description.
 
 Packed games can also update their content without replacing the executable.
 `keygen` creates an Ed25519 key pair, `pack --update-url --update-key` embeds the

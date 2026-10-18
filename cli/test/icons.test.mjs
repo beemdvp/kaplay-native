@@ -123,6 +123,32 @@ test("pack embeds the window icon in the config", (t) => {
     assert.equal(existsSync(join(dir, `${output}.icns`)), false);
 });
 
+test("pack embeds the desktop comment", (t) => {
+    const dir = workspace(t);
+    writeFileSync(join(dir, "game.pak"), "pak contents");
+    writeFileSync(join(dir, "host"), "host bytes");
+    writeFileSync(join(dir, "icon.png"), squarePng(512));
+    const output = process.platform === "win32" ? "packed.exe" : "packed";
+    const result = run(
+        [
+            "pack",
+            "--pak",
+            "game.pak",
+            "--host",
+            "host",
+            "--out",
+            "packed",
+            "--icon",
+            "icon.png",
+            "--comment",
+            "Free Pixelart Isometric MMORPG",
+        ],
+        dir,
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readConfig(join(dir, output)).comment, "Free Pixelart Isometric MMORPG");
+});
+
 test("pack writes an icns beside a Mach-O host", (t) => {
     const dir = workspace(t);
     writeFileSync(join(dir, "game.pak"), "pak contents");

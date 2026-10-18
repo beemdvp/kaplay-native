@@ -61,6 +61,7 @@ Options that change what the game does when launched:
 | `--update-url <url>` | Manifest URL checked on launch |
 | `--update-key <key>` | Ed25519 public key (base64 or a `.pub` file) |
 | `--icon <png>` | Square PNG (256-2048) for the window and platform icons |
+| `--comment <text>` | Description for the Linux desktop entry |
 
 `--js-engine v8` also selects the V8 host flavor when the CLI downloads one.
 The result contains only that engine, so a QuickJS-packed game cannot switch to
@@ -75,8 +76,9 @@ packaging itself. Pack from an existing archive with `--pak game.pak`.
 
 - **Window and taskbar:** a normalized 128x128 copy is embedded in the config
   and handed to the window system, so Windows and X11 show it before and while
-  the game runs. Wayland does not accept client icons; it matches the app id
-  (`--game-id`, or a slug of `--title`) against an installed `.desktop` file.
+  the game runs. Wayland does not accept client icons; the host installs a
+  `.desktop` entry (below) so compositors and application menus can use the
+  embedded icon.
 - **Windows executable:** `pack` adds a multi-size icon group to the PE, so
   Explorer, shortcuts, and the taskbar use the same icon when the game is not
   running. Patching the PE invalidates an existing Authenticode signature, so
@@ -84,9 +86,18 @@ packaging itself. Pack from an existing archive with `--pak game.pak`.
 - **macOS:** `pack` writes `<output>.icns` beside the binary. Copy it into the
   bundle as `Contents/Resources/AppIcon.icns` and set `CFBundleIconFile` to
   `AppIcon`; Finder and the Dock read the bundle icon.
-- **Linux launchers:** the window icon covers X11 taskbars. Add a `.desktop`
-  file whose name matches the app id and set `Icon=` to an installed PNG to
-  cover application menus and Wayland compositors.
+- **Linux launchers:** on first launch of a packed game with `--icon`, the host
+  writes `~/.local/share/applications/<app-id>.desktop` and
+  `~/.local/share/icons/hicolor/128x128/apps/<app-id>.png` (respecting
+  `XDG_DATA_HOME`). `Exec=` points at the running binary, `Name=` at the window
+  title, and `Comment=` at `--comment` (or the title). This covers application
+  menus and Wayland compositors; X11 taskbars also use the window icon. The
+  entry is rewritten when the binary moves, and skipped for `--headless`,
+  `--frames`, `--pak`, `--dir`, `--script`, and Steam launches. Set
+  `KAPLAY_NATIVE_NO_DESKTOP=1` to disable it. The entry is user-local, so a
+  desktop environment may show it with a "Local" source label; that is the
+  entry's origin, not the game's name. Restart the session if the launcher
+  cached its app list before the first launch.
 
 At runtime the embedded defaults sit between the command line and the built-in
 defaults, so all of these still work on a packed game:

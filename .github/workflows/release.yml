@@ -127,6 +127,10 @@ jobs:
       - name: Stage the v8 host
         shell: bash
         run: cp "target/${{ matrix.target }}/release/kaplay-native-host${{ matrix.ext }}" "${{ matrix.asset_v8 }}"
+      - name: Install the CLI dependencies
+        if: matrix.native
+        run: npm ci
+        working-directory: cli
       - name: Pack and run a game
         if: matrix.native
         shell: bash

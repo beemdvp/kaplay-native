@@ -106,6 +106,7 @@ Common options:
   --no-update       Skip the content update check
   --reset-content   Delete installed content updates before starting
   --icon <png>      Square PNG for the window, Windows exe, and macOS icns
+  --comment <text>  Desktop entry description for Linux app menus
 
 Content update options:
   --game-id <id>        Stable id for saves and updates
@@ -500,6 +501,9 @@ async function packCommand(options) {
     const config = {};
     if (options["js-engine"]) config.jsEngine = options["js-engine"];
     if (options.title) config.title = options.title;
+    if (typeof options.comment === "string" && options.comment.trim()) {
+        config.comment = options.comment.trim();
+    }
     if (options.window) config.window = options.window;
     if (options["allow-network"]) config.network = true;
     if (options.url) config.url = options.url;

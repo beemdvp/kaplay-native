@@ -2,6 +2,8 @@ mod app;
 mod auth;
 mod bridge;
 mod config;
+#[cfg(target_os = "linux")]
+mod desktop;
 mod embed;
 mod js;
 mod keys;
@@ -235,6 +237,16 @@ fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| app_id_name(&game_name));
     let icon = pack.icon.as_deref().and_then(decode_icon);
 
+    #[cfg(target_os = "linux")]
+    let desktop_comment = pack.comment.clone();
+    #[cfg(target_os = "linux")]
+    let install_desktop = args.pak.is_none()
+        && args.dir.is_none()
+        && args.script.is_none()
+        && args.appid.is_none()
+        && args.frames.is_none()
+        && !args.headless;
+
     let config = HostConfig {
         script: args.script,
         preload: args.preload,
@@ -261,6 +273,11 @@ fn main() -> anyhow::Result<()> {
         js_engine,
         updates: update_state,
     };
+
+    #[cfg(target_os = "linux")]
+    if install_desktop {
+        desktop::install(&config, desktop_comment.as_deref());
+    }
 
     HostApp::new(config, std::rc::Rc::new(source))?.run()
 }

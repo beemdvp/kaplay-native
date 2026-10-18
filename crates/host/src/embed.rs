@@ -15,6 +15,8 @@ pub const HEADER_LEN: u64 = 24;
 pub struct PackConfig {
     pub js_engine: Option<String>,
     pub title: Option<String>,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub comment: Option<String>,
     pub window: Option<String>,
     pub network: Option<bool>,
     pub url: Option<String>,
@@ -130,6 +132,22 @@ mod tests {
         assert_eq!(embedded.pak, b"pak bytes");
         assert!(embedded.config.js_engine.is_none());
         assert!(embedded.config.title.is_none());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn reads_a_desktop_comment() {
+        let path = std::env::temp_dir().join(format!("kap-embed-comment-{}", std::process::id()));
+        write_embedded(
+            &path,
+            b"pak bytes",
+            r#"{"comment":"Free Pixelart Isometric MMORPG"}"#,
+        );
+        let embedded = read(&path).unwrap();
+        assert_eq!(
+            embedded.config.comment.as_deref(),
+            Some("Free Pixelart Isometric MMORPG")
+        );
         std::fs::remove_file(&path).ok();
     }
 
