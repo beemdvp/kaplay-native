@@ -29,7 +29,7 @@ fontdb = "0.24"
 glow = "0.18"
 glutin = "0.32"
 glutin-winit = "0.5"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
 libloading = "0.8"
 log = "0.4"
 opus-pure = "0.2"

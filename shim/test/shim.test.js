@@ -1231,3 +1231,131 @@ test("window.open hands the url to the system browser and resolves the auth call
     assert.equal(messages.length, 1);
     window.removeEventListener("message", listener);
 });
+
+test("canvas fullscreen and pointer lock drive the native window", () => {
+    const canvas = makeCanvas();
+    const changes = [];
+    const fullscreen = () => changes.push("fullscreen");
+    const pointer = () => changes.push("pointer");
+    document.addEventListener("fullscreenchange", fullscreen);
+    document.addEventListener("pointerlockchange", pointer);
+
+    stub.calls.length = 0;
+    canvas.requestFullscreen();
+    assert.equal(document.fullscreenElement, canvas);
+    assert.equal(document.webkitFullscreenElement, canvas);
+    assert.deepEqual(
+        stub.calls.filter((call) => call.name === "window.setFullscreen").at(-1).args,
+        [true],
+    );
+
+    document.exitFullscreen();
+    assert.equal(document.fullscreenElement, null);
+    assert.deepEqual(
+        stub.calls.filter((call) => call.name === "window.setFullscreen").at(-1).args,
+        [false],
+    );
+
+    canvas.requestPointerLock();
+    assert.equal(document.pointerLockElement, canvas);
+    assert.deepEqual(
+        stub.calls.filter((call) => call.name === "window.setCursorLocked").at(-1).args,
+        [true],
+    );
+
+    document.exitPointerLock();
+    assert.equal(document.pointerLockElement, null);
+    assert.deepEqual(
+        stub.calls.filter((call) => call.name === "window.setCursorLocked").at(-1).args,
+        [false],
+    );
+    assert.deepEqual(changes, ["fullscreen", "fullscreen", "pointer", "pointer"]);
+
+    document.removeEventListener("fullscreenchange", fullscreen);
+    document.removeEventListener("pointerlockchange", pointer);
+});
+
+test("removing the main canvas and closing the window quit the host", () => {
+    const canvas = makeCanvas();
+    stub.calls.length = 0;
+    canvas.remove();
+    assert.equal(canvas.parentElement, null);
+    assert.equal(stub.calls.filter((call) => call.name === "env.quit").length, 1);
+
+    stub.calls.length = 0;
+    window.close();
+    assert.equal(stub.calls.filter((call) => call.name === "env.quit").length, 1);
+});
+
+test("download anchors save their bytes through the native bridge", () => {
+    const anchor = document.createElement("a");
+    anchor.href = "data:text/plain;charset=utf-8,hello";
+    anchor.download = "hello.txt";
+    anchor.click();
+
+    let saved = stub.calls.filter((call) => call.name === "fs.download").at(-1);
+    assert.deepEqual(saved.args, ["hello.txt", [104, 101, 108, 108, 111]]);
+
+    anchor.href = "data:text/plain;charset=utf-8,100%";
+    anchor.download = "percent.txt";
+    anchor.click();
+    saved = stub.calls.filter((call) => call.name === "fs.download").at(-1);
+    assert.deepEqual(saved.args, ["percent.txt", Array.from(new TextEncoder().encode("100%"))]);
+
+    anchor.download = "";
+    anchor.click();
+    saved = stub.calls.filter((call) => call.name === "fs.download").at(-1);
+    assert.deepEqual(saved.args, ["", Array.from(new TextEncoder().encode("100%"))]);
+
+    const blob = new Blob(["blob-data"], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    anchor.href = url;
+    anchor.download = "blob.txt";
+    anchor.click();
+    saved = stub.calls.filter((call) => call.name === "fs.download").at(-1);
+    assert.deepEqual(saved.args, ["blob.txt", Array.from(new TextEncoder().encode("blob-data"))]);
+    URL.revokeObjectURL(url);
+});
+
+test("images load from http urls when network access is enabled", async () => {
+    globalThis.__kapNative.env.networkAllowed = true;
+    stub.net.route("http://127.0.0.1:2567/remote.png", {
+        headers: [["content-type", "image/png"]],
+        body: new Uint8Array([1, 2, 3, 4, 5]),
+    });
+
+    const image = new Image();
+    const loaded = new Promise((resolve, reject) => {
+        image.onload = () => resolve([image.width, image.height, image.naturalWidth, image.naturalHeight]);
+        image.onerror = reject;
+    });
+    image.src = "http://127.0.0.1:2567/remote.png";
+    await new Promise((resolve) => {
+        const check = () => {
+            if (image.complete) resolve();
+            else queueMicrotask(check);
+        };
+        check();
+    });
+    advance(0);
+    assert.deepEqual(await loaded, [5, 1, 5, 1]);
+});
+
+test("fonts load from http urls and data urls", async () => {
+    globalThis.__kapNative.env.networkAllowed = true;
+    stub.net.route("http://127.0.0.1:2567/remote.ttf", {
+        body: new Uint8Array([7, 7, 7, 7]),
+    });
+
+    const remote = new FontFace("RemoteFont", "url(http://127.0.0.1:2567/remote.ttf)");
+    await remote.load();
+    assert.equal(remote.status, "loaded");
+    let registered = stub.calls.filter((call) => call.name === "font.register").at(-1);
+    assert.deepEqual(registered.args, ["RemoteFont", 4]);
+
+    const inline = new FontFace("InlineFont", "url(data:font/ttf;base64,AQIDBA==)");
+    await inline.load();
+    assert.equal(inline.status, "loaded");
+    registered = stub.calls.filter((call) => call.name === "font.register").at(-1);
+    assert.deepEqual(registered.args, ["InlineFont", 4]);
+});

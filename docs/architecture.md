@@ -56,7 +56,8 @@ and the remaining jobs still run.
 
 - `env` - version, platform, game name, `now()`, `log()`, `quit()`
 - `window` - size, title, fullscreen, cursor
-- `fs` - asset reads (`size`, `exists`, `read(path, out)`)
+- `fs` - asset reads (`size`, `exists`, `read(path, out)`) and downloads
+  (`download(name, bytes) -> saved path`)
 - `storage` - `localStorage` persistence (`load`, `save`)
 - `image` - decode from bytes or data URLs, dimensions
 - `font` - register font bytes, query families

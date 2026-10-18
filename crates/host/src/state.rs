@@ -1,6 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
@@ -179,6 +179,22 @@ impl HostState {
         }
     }
 
+    pub fn save_download(&self, name: &str, bytes: &[u8]) -> Option<PathBuf> {
+        let mut directories = Vec::new();
+        if let Some(directory) = dirs::download_dir() {
+            directories.push(directory);
+        }
+        if let Some(home) = dirs::home_dir() {
+            directories.push(home.join("Downloads"));
+        }
+        if let Some(parent) = self.save_path.parent() {
+            directories.push(parent.to_path_buf());
+        }
+        directories
+            .into_iter()
+            .find_map(|directory| write_download(&directory, name, bytes))
+    }
+
     pub fn set_cursor(&self, cursor: &str) {
         log::debug!("cursor: {cursor}");
         *self.cursor.borrow_mut() = cursor.to_string();
@@ -210,6 +226,52 @@ impl HostState {
     }
 }
 
+fn write_download(directory: &Path, name: &str, bytes: &[u8]) -> Option<PathBuf> {
+    std::fs::create_dir_all(directory).ok()?;
+    let path = unique_download_path(directory, download_name(name));
+    std::fs::write(&path, bytes).ok()?;
+    Some(path)
+}
+
+fn download_name(name: &str) -> String {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or_default().trim();
+    let filtered: String = base
+        .chars()
+        .filter(|character| {
+            !character.is_control() && !matches!(character, ':' | '*' | '?' | '"' | '<' | '>' | '|')
+        })
+        .collect();
+    if filtered.is_empty() || filtered == "." || filtered == ".." {
+        "download".to_string()
+    } else {
+        filtered
+    }
+}
+
+fn unique_download_path(directory: &Path, name: String) -> PathBuf {
+    let candidate = directory.join(&name);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let path = Path::new(&name);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("download");
+    let extension = path.extension().and_then(|value| value.to_str());
+    for index in 1.. {
+        let file = match extension {
+            Some(extension) => format!("{stem} ({index}).{extension}"),
+            None => format!("{stem} ({index})"),
+        };
+        let candidate = directory.join(file);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
 fn cursor_icon(cursor: &str) -> winit::window::CursorIcon {
     use winit::window::CursorIcon;
     match cursor {
@@ -227,5 +289,46 @@ fn cursor_icon(cursor: &str) -> winit::window::CursorIcon {
         "wait" => CursorIcon::Wait,
         "none" => CursorIcon::Default,
         _ => CursorIcon::Default,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WEBP: &str = "UklGRjwAAABXRUJQVlA4IDAAAADQAQCdASoBAAEAAgA0JaACdLoB+AADsAD+8Oj3/yC5YXXI1/8gP+QH/ID/+PIAAAA=";
+    const GIF: &str = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+    const BMP: &str =
+        "Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAD+AA==";
+
+    fn image_bytes(value: &str) -> Vec<u8> {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD
+            .decode(value)
+            .unwrap()
+    }
+
+    #[test]
+    fn downloads_keep_names_and_avoid_overwrites() {
+        let directory =
+            std::env::temp_dir().join(format!("kaplay-native-download-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+
+        let first = write_download(&directory, "../save.txt", b"one").unwrap();
+        assert_eq!(first.file_name().unwrap(), "save.txt");
+        let second = write_download(&directory, "save.txt", b"two").unwrap();
+        assert_ne!(first, second);
+        assert_eq!(std::fs::read(first).unwrap(), b"one");
+        assert_eq!(std::fs::read(second).unwrap(), b"two");
+
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn image_decoder_accepts_webp_gif_and_bmp() {
+        for bytes in [image_bytes(WEBP), image_bytes(GIF), image_bytes(BMP)] {
+            let image = image::load_from_memory(&bytes).unwrap();
+            assert_eq!((image.width(), image.height()), (1, 1));
+        }
     }
 }

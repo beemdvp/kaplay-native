@@ -215,6 +215,24 @@ fn install_fs<'js>(
             )?,
         )?;
     }
+    {
+        let state = state.clone();
+        object.set(
+            "download",
+            Function::new(
+                ctx.clone(),
+                move |name: String, data: TypedArray<u8>| -> String {
+                    let Some(bytes) = slice_u8(&data) else {
+                        return String::new();
+                    };
+                    state
+                        .save_download(&name, bytes)
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                },
+            )?,
+        )?;
+    }
     native.set("fs", object)?;
     Ok(())
 }
