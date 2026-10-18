@@ -211,10 +211,43 @@ returns `NO_ERROR`, and `isContextLost` returns `false`.
   MP4, from bundled files, data URLs, and HTTP(S) URLs.
 - `AudioWorklet`, `ScriptProcessorNode`, `AudioContext.createMediaStreamSource`,
   `createMediaStreamDestination`, and `record()`/`MediaRecorder` are not
-  implemented. Without an audio device the engine runs silently and playback
-  still advances in real time.
+  implemented; see [Web Audio limitations](#web-audio-limitations).
+- Without an audio device the engine runs silently and playback still advances
+  in real time.
 - Touch events are not delivered from native input yet, so `isTouchscreen()`
   reports false.
+
+## Web Audio limitations
+
+The shim renders effect graphs to PCM when a source starts; it does not run a
+real-time JavaScript audio graph or a capture pipeline. The remaining APIs need
+subsystems that do not exist yet:
+
+- `AudioWorklet` runs JavaScript DSP on the audio thread in 128-frame render
+  quanta. QuickJS and V8 run on the main thread, while `crates/audio` renders on
+  the ALSA thread or the `cpal` callback. A compliant implementation needs a
+  separate worker JS runtime, `registerProcessor`, message ports, parameter
+  descriptors, and real-time render-quantum scheduling; invoking the main
+  runtime from the mixer callback is not thread-safe and would risk dropouts.
+- `ScriptProcessorNode` invokes `onaudioprocess` repeatedly during playback
+  with streaming input and output buffers. The current graph renderer produces
+  a complete PCM buffer before playback and the native mixer has no streaming
+  PCM bridge. Supporting it needs ring buffers, periodic JS callbacks, input
+  and output buffer assembly, and underrun handling. It is also deprecated in
+  favor of `AudioWorklet`.
+- `MediaStreamAudioSourceNode` / `AudioContext.createMediaStreamSource` needs
+  microphone or system capture, device enumeration, permissions, and
+  platform-specific capture backends. The engine has audio output and a master
+  analyser tap, but no capture path.
+- `MediaStreamAudioDestinationNode` / `createMediaStreamDestination`,
+  `MediaRecorder`, and `record()` need graph output routed into a live stream,
+  plus canvas `captureStream`, an encoder, and a muxer. The master analyser tap
+  cannot substitute for a node-local stream and would not make recording work.
+
+The offline renderer also has explicit limits: rendered sources are capped at 30
+seconds, convolution impulse responses at 5 seconds, `DelayNode` feedback loops
+are rejected, and parameter changes after playback starts do not affect a
+rendered voice. Construct and connect the graph before calling `start()`.
 
 ## Platforms
 

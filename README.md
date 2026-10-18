@@ -226,7 +226,9 @@ same engine:
 - `AnalyserNode` reads time-domain and frequency-domain data from the mixed
   master output.
 - `AudioWorklet`, `ScriptProcessorNode`, `MediaStream` sources/destinations,
-  and `record()`/`MediaRecorder` are not implemented.
+  and `record()`/`MediaRecorder` are not implemented. See
+  [Web Audio limitations](docs/compatibility.md#web-audio-limitations) for why
+  they need real-time JS, streaming PCM, or capture/encoding infrastructure.
 - Output: ALSA on Linux, WASAPI on Windows, CoreAudio on macOS. If no device is
   available the game keeps running silently and `currentTime` still advances, so
   sounds still start and end.
