@@ -70,6 +70,10 @@ export function installStub() {
                 out.set(data.subarray(0, out.length));
                 return true;
             },
+            download: (name, data) => {
+                record("fs.download", [String(name), Array.from(data)]);
+                return "/downloads/" + name;
+            },
         },
         storage: {
             load: () => JSON.stringify(Object.fromEntries(state.storage)),

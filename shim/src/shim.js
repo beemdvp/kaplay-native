@@ -186,10 +186,11 @@
     }
 
     function decodeDataURL(url) {
-        const match = /^data:([^;,]*)?(;base64)?,(.*)$/s.exec(String(url));
+        const match = /^data:([^,]*),([\s\S]*)$/.exec(String(url));
         if (!match) return null;
-        const payload = match[3];
-        if (match[2]) {
+        const meta = match[1];
+        const payload = match[2];
+        if (/;\s*base64(?:;|$)/i.test(meta)) {
             const binary = atob(payload);
             const bytes = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -198,7 +199,7 @@
         try {
             return utf8Encode(decodeURIComponent(payload));
         } catch (error) {
-            return null;
+            return utf8Encode(payload);
         }
     }
 
@@ -635,6 +636,35 @@
 
         blur() {
             if (document.activeElement === this) document.activeElement = null;
+        }
+
+        requestPointerLock() {
+            native.window.setCursorLocked(true);
+            document.pointerLockElement = this;
+            documentListeners.emit(makeEvent("pointerlockchange", {}));
+            return Promise.resolve();
+        }
+
+        requestFullscreen() {
+            native.window.setFullscreen(true);
+            document.fullscreenElement = this;
+            documentListeners.emit(makeEvent("fullscreenchange", {}));
+            return Promise.resolve();
+        }
+
+        webkitRequestFullscreen() {
+            return this.requestFullscreen();
+        }
+
+        remove() {
+            const parent = this.__parent;
+            const quits = this === mainCanvas || Boolean(this.__gl && parent);
+            if (parent && typeof parent.removeChild === "function") parent.removeChild(this);
+            else this.__parent = null;
+            if (quits) {
+                mainCanvas = null;
+                native.env.quit();
+            }
         }
 
         toDataURL() {
@@ -1296,9 +1326,12 @@
     class Image {
         constructor(width, height) {
             this.__id = -1;
+            this.__load = 0;
             this._src = "";
             this.width = Number(width) || 0;
             this.height = Number(height) || 0;
+            this.naturalWidth = this.width;
+            this.naturalHeight = this.height;
             this.onload = null;
             this.onerror = null;
             this.complete = false;
@@ -1310,29 +1343,83 @@
         }
 
         set src(value) {
-            this._src = String(value);
-            let id = -1;
-            try {
-                const data = decodeDataURL(this._src);
-                id = data ? native.image.decode(data) : native.image.load(this._src);
-            } catch (error) {
-                reportError(error);
-            }
-            if (id >= 0) {
+            const url = String(value);
+            this._src = url;
+            this.complete = false;
+            const request = ++this.__load;
+            const accept = (id) => {
+                if (request !== this.__load) return;
+                if (id < 0) {
+                    fail();
+                    return;
+                }
                 this.__id = id;
                 this.width = native.image.width(id);
                 this.height = native.image.height(id);
+                this.naturalWidth = this.width;
+                this.naturalHeight = this.height;
                 this.complete = true;
                 setTimeoutFn(() => {
+                    if (request !== this.__load) return;
                     if (typeof this.onload === "function") this.onload({ target: this });
                 }, 0);
-            } else {
+            };
+            const fail = () => {
+                if (request !== this.__load) return;
+                this.__id = -1;
+                this.width = 0;
+                this.height = 0;
+                this.naturalWidth = 0;
+                this.naturalHeight = 0;
+                this.complete = true;
                 setTimeoutFn(() => {
+                    if (request !== this.__load) return;
                     if (typeof this.onerror === "function") {
-                        this.onerror(new Error("Failed to load image " + this._src));
+                        this.onerror(new Error("Failed to load image " + url));
                     }
                 }, 0);
+            };
+            const apply = (bytes) => {
+                let id = -1;
+                try {
+                    id = native.image.decode(bytes);
+                } catch (error) {
+                    reportError(error);
+                }
+                accept(id);
+            };
+            const data = decodeDataURL(url);
+            if (data) {
+                apply(data);
+                return;
             }
+            if (/^data:/i.test(url)) {
+                fail();
+                return;
+            }
+            if (/^blob:/i.test(url)) {
+                const blob = objectURLs.get(url);
+                if (blob) apply(blobBytes(blob));
+                else fail();
+                return;
+            }
+            try {
+                const id = native.image.load(url);
+                if (id >= 0) {
+                    accept(id);
+                    return;
+                }
+            } catch (error) {
+                reportError(error);
+            }
+            if (!native.env.networkAllowed) {
+                fail();
+                return;
+            }
+            fetchResource(url)
+                .then((response) => response.arrayBuffer())
+                .then((buffer) => apply(new Uint8Array(buffer)))
+                .catch(fail);
         }
     }
 
@@ -1695,24 +1782,50 @@
 
         load() {
             if (this.loaded) return this.loaded;
-            let bytes = this.__bytes;
-            if (!bytes) {
-                const match = /url\((?:"|')?(.*?)(?:"|')?\)/.exec(String(this.source));
-                const path = match ? match[1] : String(this.source);
-                const size = native.fs.size(path);
-                if (size >= 0) {
-                    bytes = new Uint8Array(size);
-                    native.fs.read(path, bytes);
-                }
+            if (this.__bytes) return this.__finish(this.__bytes);
+            const source = String(this.source);
+            const match = /url\((?:"|')?(.*?)(?:"|')?\)/.exec(source);
+            const path = match ? match[1] : source;
+            const data = decodeDataURL(path);
+            if (data) return this.__finish(data);
+            if (/^blob:/i.test(path)) {
+                const blob = objectURLs.get(path);
+                return blob ? this.__finish(blobBytes(blob)) : this.__fail();
             }
-            if (bytes) {
-                native.font.register(this.family, bytes);
-                this.status = "loaded";
-                this.loaded = Promise.resolve(this);
-            } else {
-                this.status = "error";
-                this.loaded = Promise.reject(new Error("Failed to load font " + this.family));
+            const size = native.fs.size(path);
+            if (size >= 0) {
+                const bytes = new Uint8Array(size);
+                if (native.fs.read(path, bytes)) return this.__finish(bytes);
             }
+            if (!native.env.networkAllowed) return this.__fail();
+            this.status = "loading";
+            this.loaded = fetchResource(path)
+                .then((response) => response.arrayBuffer())
+                .then((buffer) => {
+                    this.__register(new Uint8Array(buffer));
+                    return this;
+                })
+                .catch(() => {
+                    this.status = "error";
+                    throw new Error("Failed to load font " + this.family);
+                });
+            return this.loaded;
+        }
+
+        __finish(bytes) {
+            this.__register(bytes);
+            this.loaded = Promise.resolve(this);
+            return this.loaded;
+        }
+
+        __register(bytes) {
+            native.font.register(this.family, bytes);
+            this.status = "loaded";
+        }
+
+        __fail() {
+            this.status = "error";
+            this.loaded = Promise.reject(new Error("Failed to load font " + this.family));
             return this.loaded;
         }
     }
@@ -3266,7 +3379,7 @@
             this.__attributes.set(key, String(value));
             if (key === "id") this.id = String(value);
             if (key === "class") this.className = String(value);
-            if (["src", "href", "rel", "type", "name", "value"].includes(key)) this[key] = String(value);
+            if (["src", "href", "download", "rel", "type", "name", "value"].includes(key)) this[key] = String(value);
         }
 
         getAttribute(name) {
@@ -3379,6 +3492,31 @@
         select() {}
 
         click() {
+            if (this.tagName === "A" && ("download" in this || this.hasAttribute("download"))) {
+                const name = this.download === true ? "" : String(this.download || "");
+                const href = String(this.href || "");
+                if (href) {
+                    const data = decodeDataURL(href);
+                    if (data) {
+                        native.fs.download(name, data);
+                        return;
+                    }
+                    if (/^blob:/i.test(href)) {
+                        const blob = objectURLs.get(href);
+                        if (blob) {
+                            native.fs.download(name, blobBytes(blob));
+                            return;
+                        }
+                    }
+                    if (/^https?:/i.test(href) || !/^[a-z][a-z0-9+.-]*:/i.test(href)) {
+                        fetchResource(href)
+                            .then((response) => response.arrayBuffer())
+                            .then((buffer) => native.fs.download(name, new Uint8Array(buffer)))
+                            .catch((error) => console.error("download failed:", error));
+                        return;
+                    }
+                }
+            }
             this.__emit("click", makeEvent("click", {}));
         }
 
@@ -3666,13 +3804,24 @@
                         && (attrValue === undefined || element.getAttribute(attr) === attrValue)));
             });
         },
+        get webkitFullscreenElement() {
+            return this.fullscreenElement;
+        },
         exitPointerLock() {
             native.window.setCursorLocked(false);
             document.pointerLockElement = null;
+            documentListeners.emit(makeEvent("pointerlockchange", {}));
+        },
+        webkitExitPointerLock() {
+            this.exitPointerLock();
         },
         exitFullscreen() {
             native.window.setFullscreen(false);
             document.fullscreenElement = null;
+            documentListeners.emit(makeEvent("fullscreenchange", {}));
+        },
+        webkitExitFullScreen() {
+            this.exitFullscreen();
         },
         addEventListener(type, fn) {
             documentListeners.add(type, fn);
@@ -4527,6 +4676,7 @@
     define("TextEncoder", TextEncoder);
     define("TextDecoder", TextDecoder);
     global.fetch = fetchResource;
+    global.close = () => native.env.quit();
     global.atob = atob;
     global.btoa = btoa;
     global.requestAnimationFrame = requestAnimationFrame;

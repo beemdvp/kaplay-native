@@ -58,7 +58,12 @@ missing.
 - `ResizeObserver`
 - `MutationObserver` (records are not observed; the callback API is a stub used
   by bundler polyfills)
-- `exitPointerLock`, `exitFullscreen`
+- `canvas.requestPointerLock()` and `canvas.requestFullscreen()`, with
+  `document.pointerLockElement`/`fullscreenElement`, `pointerlockchange` and
+  `fullscreenchange` events, `exitPointerLock`/`exitFullscreen`, and the
+  `webkit` aliases
+- `quit()` and `window.close()` stop the host; removing the main canvas also
+  exits, which is how KAPLAY's `quit()` behaves natively
 - `requestAnimationFrame`, `setTimeout`, `setInterval` and cancellations
 
 Pointer events carry `clientX/clientY`, `offsetX/offsetY` scaled through the
@@ -142,9 +147,14 @@ returns `NO_ERROR`, and `isContextLost` returns `false`.
   `close(code, reason)`, and `onopen`/`onmessage`/`onerror`/`onclose` plus
   `addEventListener`. Plain `ws://` and TLS `wss://` connections are both
   supported.
-- `Image` with data URLs and file paths (the decode path also accepts any
-  image format supported by the `image` crate).
-- `FontFace` from an `ArrayBuffer`/typed array or from `url(...)`.
+- `Image` with data URLs, blob URLs, bundled files, and HTTP(S) URLs when
+  `--allow-network` is set. PNG, JPEG, WebP, GIF (first frame), and BMP are
+  decoded, and `naturalWidth`/`naturalHeight` are populated.
+- `FontFace` from an `ArrayBuffer`/typed array, a data URL, a bundled file, or
+  an HTTP(S) URL when `--allow-network` is set.
+- `download`, `downloadText`, `downloadJSON`, and `downloadBlob` write to the
+  platform downloads directory, falling back to the save directory. Existing
+  files are not overwritten; a counter is appended to the suggested name.
 - `localStorage` is persisted as JSON in the platform data directory
   (`--save-dir` overrides it) and written atomically.
 - `AudioContext`, `AudioBuffer`, `AudioBufferSourceNode`, `GainNode`,
@@ -179,10 +189,11 @@ returns `NO_ERROR`, and `isContextLost` returns `false`.
   `navigator.mediaCapabilities.decodingInfo` report MP4 support only.
 - Decoding supports WAV, MP3, FLAC, Ogg Vorbis, Opus, and the AAC track of an
   MP4, from bundled files, data URLs, and HTTP(S) URLs.
-- `AudioWorklet`, `AnalyserNode`, and `AudioContext.createMediaStreamSource`
-  are not implemented. Without an audio device the engine runs silently and
-  playback still advances in real time.
-- `navigator.getGamepads()` returns an empty list.
+- `AudioWorklet`, `AnalyserNode`, `AudioContext.createMediaStreamSource`, and
+  `record()`/`MediaRecorder` are not implemented. Without an audio device the
+  engine runs silently and playback still advances in real time.
+- Touch events are not delivered from native input yet, so `isTouchscreen()`
+  reports false. `navigator.getGamepads()` returns an empty list.
 
 ## Platforms
 

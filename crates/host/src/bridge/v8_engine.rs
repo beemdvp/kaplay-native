@@ -326,6 +326,7 @@ fn install_fs(scope: &PinScope<'_, '_>, native: Local<v8::Object>, data: Local<V
     register(scope, object, "size", fs_size, data);
     register(scope, object, "exists", fs_exists, data);
     register(scope, object, "read", fs_read, data);
+    register(scope, object, "download", fs_download, data);
     set_property(scope, native, "fs", object.into());
 }
 
@@ -356,6 +357,15 @@ fn fs_read<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>)
         return rv.set_bool(false);
     };
     rv.set_bool(true);
+}
+
+fn fs_download<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
+    let name = string_arg(scope, &args, 0);
+    let path = with_u8(args.get(1), |bytes| host(&args).save_download(&name, bytes)).flatten();
+    match path {
+        Some(path) => set_string(scope, &mut rv, path.to_string_lossy().as_ref()),
+        None => set_string(scope, &mut rv, ""),
+    }
 }
 
 fn install_storage(scope: &PinScope<'_, '_>, native: Local<v8::Object>, data: Local<Value>) {

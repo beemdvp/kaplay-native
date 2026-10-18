@@ -40,14 +40,16 @@ for the manual validation checklist.
   `BiquadFilterNode` render short synthesized notes
 - Video: `HTMLVideoElement` over a threaded, pure-Rust H.264 MP4 decoder,
   drawn with `gl.texImage2D` (the path KAPLAY's `video()` component uses)
-- Assets: directory or `.pak` archives
+- Assets: directory or `.pak` archives, plus remote images and fonts with
+  `--allow-network`; PNG, JPEG, WebP, GIF, and BMP images decode natively
 - Steam: dynamic `steam_api` loading, user, achievements, stats, cloud storage
 - Engines: QuickJS by default, optional V8 backend for full modern JS and `Intl`
 - CLI: `run`, `dev`, `build`, `pack`, `test`, `engines`, `doctor`
 
-Not implemented yet: gamepads and the Steam Input action manifest. QuickJS
-builds have no `Intl`; use the V8 backend for locale-aware APIs. See
-[docs/engines.md](docs/engines.md) for the engine matrix.
+Not implemented yet: gamepads, touch input, screen recording, and the Steam
+Input action manifest. QuickJS builds have no `Intl`; use the V8 backend for
+locale-aware APIs. See [docs/engines.md](docs/engines.md) for the engine
+matrix.
 
 ## Quick start
 
