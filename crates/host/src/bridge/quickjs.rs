@@ -275,7 +275,7 @@ fn install_image<'js>(
         object.set(
             "load",
             Function::new(ctx.clone(), move |url: String| -> i32 {
-                let Some(bytes) = state.assets.read(&url) else {
+                let Some(bytes) = state.assets.read_uncached(&url) else {
                     return -1;
                 };
                 handle(state.decode_image(&bytes))
@@ -317,6 +317,15 @@ fn install_image<'js>(
                     .borrow()
                     .get(&id)
                     .map_or(-1, |image| image.height as i32)
+            })?,
+        )?;
+    }
+    {
+        let state = state.clone();
+        object.set(
+            "free",
+            Function::new(ctx.clone(), move |id: u32| {
+                state.free_image(id);
             })?,
         )?;
     }
@@ -566,6 +575,7 @@ fn install_canvas<'js>(
                                 width: image.width,
                                 height: image.height,
                                 data: &image.pixels,
+                                premultiplied: false,
                             },
                             sx,
                             sy,
@@ -638,11 +648,7 @@ fn install_canvas<'js>(
         object.set(
             "pngLength",
             Function::new(ctx.clone(), move |canvas: u32| -> i32 {
-                state
-                    .canvas
-                    .borrow()
-                    .to_png(canvas)
-                    .map_or(-1, |data| data.len() as i32)
+                state.canvas_png_length(canvas)
             })?,
         )?;
     }
@@ -653,15 +659,10 @@ fn install_canvas<'js>(
             Function::new(
                 ctx.clone(),
                 move |canvas: u32, mut out: TypedArray<u8>| -> bool {
-                    let Some(data) = state.canvas.borrow().to_png(canvas) else {
-                        return false;
-                    };
                     let Some(out) = slice_u8_mut(&mut out) else {
                         return false;
                     };
-                    let length = data.len().min(out.len());
-                    out[..length].copy_from_slice(&data[..length]);
-                    true
+                    state.copy_canvas_png(canvas, out)
                 },
             )?,
         )?;
@@ -715,8 +716,7 @@ fn install_net<'js>(
                 let Some(network) = state.network.as_ref() else {
                     return false;
                 };
-                network.open_socket(id, url);
-                true
+                network.open_socket(id, url)
             })?,
         )?;
     }
@@ -1196,10 +1196,15 @@ fn install_gamepad<'js>(
     state: &Rc<HostState>,
 ) -> rquickjs::Result<()> {
     let object = Object::new(ctx.clone())?;
-    let state = state.clone();
+    let list_state = state.clone();
     object.set(
         "list",
-        Function::new(ctx.clone(), move || -> String { state.gamepad_json() })?,
+        Function::new(ctx.clone(), move || -> String { list_state.gamepad_json() })?,
+    )?;
+    let revision_state = state.clone();
+    object.set(
+        "revision",
+        Function::new(ctx.clone(), move || revision_state.gamepad_revision())?,
     )?;
     native.set("gamepad", object)?;
     Ok(())
@@ -2122,24 +2127,16 @@ fn install_gl<'js>(
     {
         let state = state.clone();
         register!("screenshotLength", move || -> i32 {
-            let (width, height, pixels) = state.gl.borrow_mut().read_default_pixels_top_down();
-            crate::screenshots::encode_bytes(&pixels, width, height)
-                .map_or(-1, |data| data.len() as i32)
+            state.screenshot_length()
         });
     }
     {
         let state = state.clone();
         register!("copyScreenshot", move |mut out: TypedArray<u8>| -> bool {
-            let (width, height, pixels) = state.gl.borrow_mut().read_default_pixels_top_down();
-            let Some(encoded) = crate::screenshots::encode_bytes(&pixels, width, height) else {
-                return false;
-            };
             let Some(out) = slice_u8_mut(&mut out) else {
                 return false;
             };
-            let length = encoded.len().min(out.len());
-            out[..length].copy_from_slice(&encoded[..length]);
-            true
+            state.copy_screenshot(out)
         });
     }
     native.set("gl", object)?;

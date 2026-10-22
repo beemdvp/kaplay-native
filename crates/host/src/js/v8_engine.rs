@@ -540,6 +540,8 @@ fn expose_module_exports(
     Ok(())
 }
 
+const MAX_CALL_ARGS: usize = 8;
+
 fn call_global_in(
     scope: &mut v8::PinScope<'_, '_>,
     name: &str,
@@ -554,6 +556,19 @@ fn call_global_in(
         .ok_or_else(|| format!("{name} is not defined"))?;
     let function =
         Local::<v8::Function>::try_from(value).map_err(|_| format!("{name} is not a function"))?;
+    if args.len() <= MAX_CALL_ARGS {
+        let mut values: [Local<v8::Value>; MAX_CALL_ARGS] =
+            std::array::from_fn(|_| v8::undefined(scope).into());
+        for (slot, arg) in values.iter_mut().zip(args) {
+            *slot = js_value(scope, arg);
+        }
+        v8::tc_scope!(let caught, scope);
+        function.call(caught, global.into(), &values[..args.len()]);
+        if caught.has_caught() {
+            return Err(exception_text!(caught));
+        }
+        return Ok(());
+    }
     let values: Vec<Local<v8::Value>> = args.iter().map(|arg| js_value(scope, arg)).collect();
     v8::tc_scope!(let caught, scope);
     function.call(caught, global.into(), &values);

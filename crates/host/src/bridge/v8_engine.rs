@@ -392,6 +392,7 @@ fn install_image(scope: &PinScope<'_, '_>, native: Local<v8::Object>, data: Loca
     register(scope, object, "decode", image_decode, data);
     register(scope, object, "width", image_width, data);
     register(scope, object, "height", image_height, data);
+    register(scope, object, "free", image_free, data);
     set_property(scope, native, "image", object.into());
 }
 
@@ -399,7 +400,7 @@ fn image_load<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'
     let url = string_arg(scope, &args, 0);
     let id = host(&args)
         .assets
-        .read(&url)
+        .read_uncached(&url)
         .and_then(|bytes| host(&args).decode_image(&bytes));
     rv.set_int32(handle(id));
 }
@@ -431,6 +432,11 @@ fn image_height<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv
             .get(&id)
             .map_or(-1, |image| image.height as i32),
     );
+}
+
+fn image_free<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv: Rv<'s>) {
+    let id = u32_arg(scope, &args, 0);
+    host(&args).free_image(id);
 }
 
 fn install_font(scope: &PinScope<'_, '_>, native: Local<v8::Object>, data: Local<Value>) {
@@ -644,6 +650,7 @@ fn canvas_draw_image<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv: 
                 width: image.width,
                 height: image.height,
                 data: &image.pixels,
+                premultiplied: false,
             },
             sx,
             sy,
@@ -694,27 +701,16 @@ fn canvas_get_image_data<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, _
 
 fn canvas_png_length<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
     let canvas = u32_arg(scope, &args, 0);
-    rv.set_int32(
-        host(&args)
-            .canvas
-            .borrow()
-            .to_png(canvas)
-            .map_or(-1, |data| data.len() as i32),
-    );
+    rv.set_int32(host(&args).canvas_png_length(canvas));
 }
 
 fn canvas_copy_png<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
     let canvas = u32_arg(scope, &args, 0);
-    let Some(data) = host(&args).canvas.borrow().to_png(canvas) else {
+    let Some(copied) = with_u8_mut(args.get(1), |out| host(&args).copy_canvas_png(canvas, out))
+    else {
         return rv.set_bool(false);
     };
-    let Some(()) = with_u8_mut(args.get(1), |out| {
-        let length = data.len().min(out.len());
-        out[..length].copy_from_slice(&data[..length]);
-    }) else {
-        return rv.set_bool(false);
-    };
-    rv.set_bool(true);
+    rv.set_bool(copied);
 }
 
 fn install_net(scope: &PinScope<'_, '_>, native: Local<v8::Object>, data: Local<Value>) {
@@ -779,8 +775,7 @@ fn net_open_socket<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv:
     let Some(network) = state.network.as_ref() else {
         return rv.set_bool(false);
     };
-    network.open_socket(id, url);
-    rv.set_bool(true);
+    rv.set_bool(network.open_socket(id, url));
 }
 
 fn net_send_text<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv: Rv<'s>) {
@@ -1143,12 +1138,19 @@ fn audio_duration<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: 
 fn install_gamepad(scope: &PinScope<'_, '_>, native: Local<v8::Object>, data: Local<Value>) {
     let object = v8::Object::new(scope);
     register(scope, object, "list", gamepad_list, data);
+    register(scope, object, "revision", gamepad_revision, data);
     set_property(scope, native, "gamepad", object.into());
 }
 
 fn gamepad_list<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
     let json = host(&args).gamepad_json();
     set_string(scope, &mut rv, &json);
+}
+
+fn gamepad_revision<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
+    let revision = host(&args).gamepad_revision();
+    let value = v8::Number::new(scope, revision as f64);
+    rv.set(value.into());
 }
 
 fn install_steam(scope: &PinScope<'_, '_>, native: Local<v8::Object>, data: Local<Value>) {
@@ -2302,23 +2304,12 @@ fn gl_read_pixels<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv: Rv<
 }
 
 fn gl_screenshot_length<'s, 'i>(_scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
-    let (width, height, pixels) = host(&args).gl.borrow_mut().read_default_pixels_top_down();
-    rv.set_int32(
-        crate::screenshots::encode_bytes(&pixels, width, height)
-            .map_or(-1, |data| data.len() as i32),
-    );
+    rv.set_int32(host(&args).screenshot_length());
 }
 
 fn gl_copy_screenshot<'s, 'i>(_scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
-    let (width, height, pixels) = host(&args).gl.borrow_mut().read_default_pixels_top_down();
-    let Some(encoded) = crate::screenshots::encode_bytes(&pixels, width, height) else {
+    let Some(copied) = with_u8_mut(args.get(0), |out| host(&args).copy_screenshot(out)) else {
         return rv.set_bool(false);
     };
-    let Some(()) = with_u8_mut(args.get(0), |out| {
-        let length = encoded.len().min(out.len());
-        out[..length].copy_from_slice(&encoded[..length]);
-    }) else {
-        return rv.set_bool(false);
-    };
-    rv.set_bool(true);
+    rv.set_bool(copied);
 }

@@ -83,7 +83,7 @@ pub fn resolve_specifier(base: &ModuleId, specifier: &str) -> Result<ModuleId, S
 pub fn read_module(assets: &AssetSource, id: &ModuleId) -> Result<Vec<u8>, String> {
     match id {
         ModuleId::Asset(path) => assets
-            .read(path)
+            .read_uncached(path)
             .map(|bytes| bytes.to_vec())
             .ok_or_else(|| format!("module '{path}' was not found in the game files")),
         ModuleId::File(path) => std::fs::read(path)

@@ -101,7 +101,7 @@ const NO_DEADLINE: u64 = u64::MAX;
 pub struct Watchdog {
     start: Instant,
     deadline_ms: AtomicU64,
-    phase: Mutex<String>,
+    phase: Mutex<&'static str>,
 }
 
 impl Watchdog {
@@ -109,12 +109,12 @@ impl Watchdog {
         Arc::new(Self {
             start: Instant::now(),
             deadline_ms: AtomicU64::new(NO_DEADLINE),
-            phase: Mutex::new(String::new()),
+            phase: Mutex::new(""),
         })
     }
 
-    pub fn mark(&self, phase: &str) {
-        *self.phase.lock().unwrap() = phase.to_string();
+    pub fn mark(&self, phase: &'static str) {
+        *self.phase.lock().unwrap() = phase;
         let deadline = self.start.elapsed().as_millis() as u64 + 4_000;
         self.deadline_ms.store(deadline, Ordering::Relaxed);
     }
@@ -128,8 +128,8 @@ impl Watchdog {
         deadline != NO_DEADLINE && self.start.elapsed().as_millis() as u64 > deadline
     }
 
-    pub fn phase(&self) -> String {
-        self.phase.lock().unwrap().clone()
+    pub fn phase(&self) -> &'static str {
+        *self.phase.lock().unwrap()
     }
 }
 

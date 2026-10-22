@@ -11,6 +11,7 @@ pub struct ImageSource<'a> {
     pub width: u32,
     pub height: u32,
     pub data: &'a [u8],
+    pub premultiplied: bool,
 }
 
 struct Canvas {
@@ -191,7 +192,7 @@ impl Canvas2d {
     }
 
     fn draw_text(&mut self, context: u32, text: &str, x: f32, y: f32, stroke: bool) {
-        let Some(context) = self.contexts.get(&context).cloned() else {
+        let Some(context) = self.contexts.get(&context) else {
             return;
         };
         let Some(canvas) = self.canvases.get_mut(&context.canvas) else {
@@ -248,18 +249,46 @@ impl Canvas2d {
         dest_width: f32,
         dest_height: f32,
     ) {
-        let Some((width, height)) = self.canvas_size(source) else {
+        let Some(destination) = self.contexts.get(&context).map(|context| context.canvas) else {
             return;
         };
-        let Some(data) = self.canvas_bytes(source).map(<[u8]>::to_vec) else {
+        if destination == source {
+            let Some((width, height)) = self.canvas_size(source) else {
+                return;
+            };
+            let Some(data) = self.canvas_bytes(source).map(<[u8]>::to_vec) else {
+                return;
+            };
+            self.draw_image(
+                context,
+                ImageSource {
+                    width,
+                    height,
+                    data: &data,
+                    premultiplied: true,
+                },
+                source_x,
+                source_y,
+                source_width,
+                source_height,
+                dest_x,
+                dest_y,
+                dest_width,
+                dest_height,
+            );
+            return;
+        }
+        let [destination, source_canvas] = self.canvases.get_disjoint_mut([&destination, &source]);
+        let (Some(destination), Some(source_canvas)) = (destination, source_canvas) else {
             return;
         };
-        self.draw_image(
-            context,
+        draw_image_into(
+            destination,
             ImageSource {
-                width,
-                height,
-                data: &data,
+                width: source_canvas.pixmap.width(),
+                height: source_canvas.pixmap.height(),
+                data: source_canvas.pixmap.data(),
+                premultiplied: true,
             },
             source_x,
             source_y,
@@ -292,57 +321,18 @@ impl Canvas2d {
         let Some(canvas) = self.canvases.get_mut(&context.canvas) else {
             return;
         };
-        if source_width <= 0.0 || source_height <= 0.0 || dest_width <= 0.0 || dest_height <= 0.0 {
-            return;
-        }
-
-        let premultiplied = premultiply(image.data, image.width as usize, image.height as usize);
-        let Some(source) =
-            tiny_skia::PixmapRef::from_bytes(&premultiplied, image.width, image.height)
-        else {
-            return;
-        };
-
-        let cropped = if source_x != 0.0
-            || source_y != 0.0
-            || source_width != image.width as f32
-            || source_height != image.height as f32
-        {
-            crop_pixmap(
-                &source,
-                source_x as i32,
-                source_y as i32,
-                source_width as u32,
-                source_height as u32,
-            )
-        } else {
-            None
-        };
-
-        let transform = tiny_skia::Transform::from_row(
-            dest_width / source_width,
-            0.0,
-            0.0,
-            dest_height / source_height,
+        draw_image_into(
+            canvas,
+            image,
+            source_x,
+            source_y,
+            source_width,
+            source_height,
             dest_x,
             dest_y,
+            dest_width,
+            dest_height,
         );
-        let paint = tiny_skia::PixmapPaint {
-            opacity: 1.0,
-            blend_mode: tiny_skia::BlendMode::SourceOver,
-            quality: tiny_skia::FilterQuality::Bilinear,
-        };
-
-        match &cropped {
-            Some(pixmap) => {
-                canvas
-                    .pixmap
-                    .draw_pixmap(0, 0, pixmap.as_ref(), &paint, transform, None)
-            }
-            None => canvas
-                .pixmap
-                .draw_pixmap(0, 0, source, &paint, transform, None),
-        }
     }
 
     pub fn put_image_data(
@@ -419,8 +409,93 @@ impl Canvas2d {
 
     pub fn to_png(&self, canvas: u32) -> Option<Vec<u8>> {
         let canvas = self.canvases.get(&canvas)?;
-        canvas.pixmap.encode_png().ok()
+        let mut data = canvas.pixmap.data().to_vec();
+        unpremultiply(&mut data);
+        encode_png(&data, canvas.pixmap.width(), canvas.pixmap.height())
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_image_into(
+    canvas: &mut Canvas,
+    image: ImageSource<'_>,
+    source_x: f32,
+    source_y: f32,
+    source_width: f32,
+    source_height: f32,
+    dest_x: f32,
+    dest_y: f32,
+    dest_width: f32,
+    dest_height: f32,
+) {
+    if source_width <= 0.0 || source_height <= 0.0 || dest_width <= 0.0 || dest_height <= 0.0 {
+        return;
+    }
+
+    let source_data =
+        &image.data[..(image.width as usize * image.height as usize * 4).min(image.data.len())];
+    let premultiplied = if image.premultiplied {
+        Cow::Borrowed(source_data)
+    } else {
+        premultiply(source_data, image.width as usize, image.height as usize)
+    };
+    let Some(source) =
+        tiny_skia::PixmapRef::from_bytes(premultiplied.as_ref(), image.width, image.height)
+    else {
+        return;
+    };
+
+    let cropped = if source_x != 0.0
+        || source_y != 0.0
+        || source_width != image.width as f32
+        || source_height != image.height as f32
+    {
+        crop_pixmap(
+            &source,
+            source_x as i32,
+            source_y as i32,
+            source_width as u32,
+            source_height as u32,
+        )
+    } else {
+        None
+    };
+
+    let transform = tiny_skia::Transform::from_row(
+        dest_width / source_width,
+        0.0,
+        0.0,
+        dest_height / source_height,
+        dest_x,
+        dest_y,
+    );
+    let paint = tiny_skia::PixmapPaint {
+        opacity: 1.0,
+        blend_mode: tiny_skia::BlendMode::SourceOver,
+        quality: tiny_skia::FilterQuality::Bilinear,
+    };
+
+    match &cropped {
+        Some(pixmap) => canvas
+            .pixmap
+            .draw_pixmap(0, 0, pixmap.as_ref(), &paint, transform, None),
+        None => canvas
+            .pixmap
+            .draw_pixmap(0, 0, source, &paint, transform, None),
+    }
+}
+
+fn encode_png(data: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
+    let mut output = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut output, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_compression(png::Compression::Fast);
+        let mut writer = encoder.write_header().ok()?;
+        writer.write_image_data(data).ok()?;
+    }
+    Some(output)
 }
 
 fn premultiply(data: &[u8], width: usize, height: usize) -> Cow<'_, [u8]> {
@@ -568,6 +643,7 @@ mod tests {
             width: 3,
             height: 2,
             data: &pixels,
+            premultiplied: false,
         };
         store.draw_image(context, source, 1.0, 0.0, 2.0, 1.0, 0.0, 0.0, 2.0, 1.0);
         let read = store.get_image_data(context, 0, 0, 2, 1);
@@ -583,11 +659,38 @@ mod tests {
             width: 2,
             height: 1,
             data: &pixels,
+            premultiplied: false,
         };
         store.draw_image(context, source, 1.0, 0.0, 8.0, 1.0, 0.0, 0.0, 8.0, 1.0);
         let read = store.get_image_data(context, 0, 0, 8, 1);
         assert_eq!(&read[..4], &[8, 0, 0, 255]);
         assert_eq!(&read[4..8], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn draws_canvas_without_double_premultiplying() {
+        let mut store = Canvas2d::new(DEFAULT_FONT.to_vec());
+        let source = store.create_canvas(1, 1);
+        let source_context = store.create_context(source).unwrap();
+        store.put_image_data(source_context, 0, 0, 1, 1, &[255, 0, 0, 128]);
+        let destination = store.create_canvas(1, 1);
+        let destination_context = store.create_context(destination).unwrap();
+        store.draw_image_from_canvas(
+            destination_context,
+            source,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+        );
+        assert_eq!(
+            store.get_image_data(destination_context, 0, 0, 1, 1),
+            vec![255, 0, 0, 128]
+        );
     }
 
     #[test]
@@ -598,6 +701,7 @@ mod tests {
             width: 2,
             height: 1,
             data: &pixels,
+            premultiplied: false,
         };
         store.draw_image(context, source, -1.0, 0.0, 2.0, 1.0, 0.0, 0.0, 2.0, 1.0);
         let read = store.get_image_data(context, 0, 0, 2, 1);

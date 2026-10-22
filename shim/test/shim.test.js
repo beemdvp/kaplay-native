@@ -1599,3 +1599,127 @@ test("gamepad connect and disconnect events carry the cached gamepad", () => {
     window.removeEventListener("gamepadconnected", connected);
     window.removeEventListener("gamepaddisconnected", disconnected);
 });
+
+test("webgl uniform and attribute locations are cached until relink", () => {
+    const canvas = makeCanvas();
+    const gl = canvas.getContext("webgl");
+    const uniformCalls = () =>
+        stub.calls.filter((entry) => entry.name === "gl.getUniformLocation").length;
+    const attribCalls = () =>
+        stub.calls.filter((entry) => entry.name === "gl.getAttribLocation").length;
+
+    const uniforms = uniformCalls();
+    const first = gl.getUniformLocation(1, "u_time");
+    assert.equal(gl.getUniformLocation(1, "u_time"), first);
+    assert.equal(uniformCalls(), uniforms + 1);
+    assert.equal(gl.getUniformLocation(1, "missing"), null);
+    assert.equal(gl.getUniformLocation(1, "missing"), null);
+    assert.equal(uniformCalls(), uniforms + 2);
+
+    gl.linkProgram(1);
+    assert.notEqual(gl.getUniformLocation(1, "u_time"), first);
+    assert.equal(uniformCalls(), uniforms + 3);
+
+    const attribs = attribCalls();
+    const position = gl.getAttribLocation(1, "a_position");
+    assert.equal(gl.getAttribLocation(1, "a_position"), position);
+    assert.equal(attribCalls(), attribs + 1);
+    gl.deleteProgram(1);
+});
+
+test("changing an image source releases the previous bitmap", () => {
+    stub.files.set("image/first.png", new Uint8Array([1, 2, 3]));
+    stub.files.set("image/second.png", new Uint8Array([4, 5, 6]));
+    const image = new Image();
+    image.src = "image/first.png";
+    const first = image.__id;
+    assert.ok(first >= 0);
+    image.src = "image/second.png";
+    const freed = stub.calls
+        .filter((entry) => entry.name === "image.free")
+        .map((entry) => entry.args[0]);
+    assert.ok(freed.includes(first));
+    assert.notEqual(image.__id, first);
+    image.__release();
+});
+
+test("released canvases destroy their native surface", () => {
+    const canvas = document.createElement("canvas");
+    const id = canvas.__id;
+    canvas.__release();
+    const destroyed = stub.calls
+        .filter((entry) => entry.name === "canvas.destroy")
+        .map((entry) => entry.args[0]);
+    assert.ok(destroyed.includes(id));
+    assert.equal(canvas.__id, -1);
+});
+
+test("detached elements disappear from document queries", () => {
+    const parent = document.createElement("div");
+    parent.className = "query-box";
+    const child = document.createElement("span");
+    child.id = "query-child";
+    child.className = "query-box";
+    parent.appendChild(child);
+    document.body.appendChild(parent);
+
+    assert.equal(document.getElementById("query-child"), child);
+    assert.ok(document.getElementsByClassName("query-box").includes(child));
+
+    parent.removeChild(child);
+    assert.equal(document.getElementById("query-child"), null);
+    assert.ok(!document.getElementsByClassName("query-box").includes(child));
+
+    document.body.appendChild(child);
+    assert.equal(document.getElementById("query-child"), child);
+    document.body.removeChild(parent);
+    document.body.removeChild(child);
+});
+
+test("audio parameter automation drops past events", () => {
+    const context = new AudioContext();
+    const gain = context.createGain();
+    const now = stub.state.time / 1000;
+    for (let index = 0; index < 10; index++) {
+        gain.gain.setValueAtTime(index, now + index / 1000);
+    }
+    advance(100);
+    const value = gain.gain.value;
+    assert.ok(Number.isFinite(value));
+    assert.ok(gain.gain.__events.length <= 1);
+});
+
+test("gamepad snapshots are reused until the native revision changes", () => {
+    const snapshot = {
+        id: "Cache Test (STANDARD GAMEPAD)",
+        index: 0,
+        connected: true,
+        mapping: "standard",
+        timestamp: 1,
+        axes: [0, 0, 0, 0],
+        buttons: [{ pressed: false, touched: false, value: 0 }],
+    };
+    stub.state.gamepads = [snapshot];
+    const listCalls = () =>
+        stub.calls.filter((entry) => entry.name === "gamepad.list").length;
+    const before = listCalls();
+    const first = navigator.getGamepads();
+    const afterFirst = listCalls();
+    const second = navigator.getGamepads();
+    assert.equal(second, first);
+    assert.equal(listCalls(), afterFirst);
+    assert.ok(afterFirst >= before);
+
+    stub.state.gamepads = [];
+    const empty = navigator.getGamepads();
+    assert.notEqual(empty, first);
+    assert.equal(empty.length, 0);
+});
+
+test("removing the main canvas clears the document reference", () => {
+    const canvas = makeCanvas();
+    assert.ok(document.getElementsByTagName("canvas").includes(canvas));
+    document.body.removeChild(canvas);
+    assert.ok(!document.getElementsByTagName("canvas").includes(canvas));
+    assert.equal(document.getElementById(canvas.id), null);
+});

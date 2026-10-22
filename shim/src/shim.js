@@ -23,6 +23,31 @@
         native.env.log("error", message);
     }
 
+    const releaseFinalizer = typeof FinalizationRegistry === "function"
+        ? new FinalizationRegistry((release) => {
+            try {
+                release();
+            } catch (error) {
+                reportError(error);
+            }
+        })
+        : null;
+
+    function registerRelease(target, release) {
+        if (!releaseFinalizer) return;
+        const token = {};
+        target.__releaseToken = token;
+        releaseFinalizer.register(target, release, token);
+    }
+
+    function unregisterRelease(target) {
+        if (!releaseFinalizer) return;
+        const token = target.__releaseToken;
+        if (!token) return;
+        releaseFinalizer.unregister(token);
+        target.__releaseToken = null;
+    }
+
     function bytesView(value) {
         if (value instanceof Uint8Array) return value;
         if (value instanceof Uint8ClampedArray) {
@@ -535,6 +560,24 @@
             this.__parent = null;
             this.__style = makeStyle();
             this.tabIndex = 0;
+            const id = this.__id;
+            if (id >= 0) {
+                registerRelease(this, () => {
+                    if (native.canvas && typeof native.canvas.destroy === "function") {
+                        native.canvas.destroy(id);
+                    }
+                });
+            }
+        }
+
+        __release() {
+            if (this.__id < 0) return;
+            unregisterRelease(this);
+            const id = this.__id;
+            this.__id = -1;
+            if (native.canvas && typeof native.canvas.destroy === "function") {
+                native.canvas.destroy(id);
+            }
         }
 
         get style() {
@@ -596,7 +639,11 @@
 
         appendChild(child) {
             if (child instanceof HTMLCanvasElement) {
+                if (child.__parent && child.__parent !== this && typeof child.__parent.removeChild === "function") {
+                    child.__parent.removeChild(child);
+                }
                 child.__parent = this;
+                registerTree(child);
                 return child;
             }
             return child;
@@ -667,7 +714,7 @@
             }
         }
 
-        toDataURL() {
+        __pngBytes() {
             let length = -1;
             let copy = null;
             if (this.__gl) {
@@ -677,9 +724,15 @@
                 length = native.canvas.pngLength(this.__id);
                 copy = (view) => native.canvas.copyPng(this.__id, view);
             }
-            if (length < 0) return "data:,";
+            if (length < 0) return null;
             const bytes = new Uint8Array(length);
             copy(bytes);
+            return bytes;
+        }
+
+        toDataURL() {
+            const bytes = this.__pngBytes();
+            if (!bytes) return "data:,";
             let binary = "";
             for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
             return "data:image/png;base64," + btoa(binary);
@@ -687,9 +740,8 @@
 
         toBlob(callback) {
             if (typeof callback !== "function") return;
-            const url = this.toDataURL();
-            const bytes = decodeDataURL(url) || new Uint8Array(0);
-            callback(new Blob([bytes], { type: "image/png" }));
+            const bytes = this.__pngBytes();
+            callback(new Blob([bytes || new Uint8Array(0)], { type: "image/png" }));
         }
     }
 
@@ -923,6 +975,8 @@
     class WebGLRenderingContext {
         constructor(canvas) {
             this.canvas = canvas;
+            this.__uniforms = new Map();
+            this.__attribs = new Map();
         }
 
         get drawingBufferWidth() {
@@ -1161,7 +1215,9 @@
         }
 
         deleteProgram(program) {
-            if (program != null) native.gl.deleteProgram(program);
+            if (program == null) return;
+            this.__invalidateProgram(program);
+            native.gl.deleteProgram(program);
         }
 
         attachShader(program, shader) {
@@ -1173,7 +1229,13 @@
         }
 
         linkProgram(program) {
+            this.__invalidateProgram(program);
             native.gl.linkProgram(program);
+        }
+
+        __invalidateProgram(program) {
+            this.__uniforms.delete(Number(program));
+            this.__attribs.delete(Number(program));
         }
 
         getProgramParameter(program, parameter) {
@@ -1191,12 +1253,35 @@
         }
 
         getAttribLocation(program, name) {
-            return program == null ? -1 : native.gl.getAttribLocation(program, String(name));
+            if (program == null) return -1;
+            const key = Number(program);
+            const nameKey = String(name);
+            let cache = this.__attribs.get(key);
+            if (cache && cache.has(nameKey)) return cache.get(nameKey);
+            const location = native.gl.getAttribLocation(program, nameKey);
+            if (!cache) {
+                cache = new Map();
+                this.__attribs.set(key, cache);
+            }
+            cache.set(nameKey, location);
+            return location;
         }
 
         getUniformLocation(program, name) {
             if (program == null) return null;
-            const location = native.gl.getUniformLocation(program, String(name));
+            const key = Number(program);
+            const nameKey = String(name);
+            let cache = this.__uniforms.get(key);
+            if (cache && cache.has(nameKey)) {
+                const location = cache.get(nameKey);
+                return location < 0 ? null : location;
+            }
+            const location = native.gl.getUniformLocation(program, nameKey);
+            if (!cache) {
+                cache = new Map();
+                this.__uniforms.set(key, cache);
+            }
+            cache.set(nameKey, location);
             return location < 0 ? null : location;
         }
 
@@ -1338,22 +1423,48 @@
             this.crossOrigin = null;
         }
 
+        __adopt(id) {
+            this.__release();
+            this.__id = id;
+            if (id >= 0) {
+                registerRelease(this, () => {
+                    if (native.image && typeof native.image.free === "function") {
+                        native.image.free(id);
+                    }
+                });
+            }
+        }
+
+        __release() {
+            if (this.__id < 0) return;
+            unregisterRelease(this);
+            const id = this.__id;
+            this.__id = -1;
+            if (native.image && typeof native.image.free === "function") native.image.free(id);
+        }
+
         get src() {
             return this._src;
         }
 
         set src(value) {
             const url = String(value);
+            this.__release();
             this._src = url;
             this.complete = false;
             const request = ++this.__load;
             const accept = (id) => {
-                if (request !== this.__load) return;
+                if (request !== this.__load) {
+                    if (id >= 0 && native.image && typeof native.image.free === "function") {
+                        native.image.free(id);
+                    }
+                    return;
+                }
                 if (id < 0) {
                     fail();
                     return;
                 }
-                this.__id = id;
+                this.__adopt(id);
                 this.width = native.image.width(id);
                 this.height = native.image.height(id);
                 this.naturalWidth = this.width;
@@ -1846,9 +1957,16 @@
     const audioBridge = native.audio || null;
     const audioVoices = new Set();
     const pendingDecodes = new Map();
+    const graphNodes = [];
+    const graphGains = [];
+    const graphPans = [];
+    const graphPanSet = [];
+    const graphVisited = new Set();
+    let automatingParams = 0;
     let nextAudioRequest = 1;
 
     function audioNow() {
+        if (inFrame) return frameTime / 1000;
         if (audioBridge && typeof audioBridge.currentTime === "function") {
             return audioBridge.currentTime();
         }
@@ -1864,7 +1982,7 @@
     }
 
     function syncAudioGraph() {
-        for (const voice of Array.from(audioVoices)) {
+        for (const voice of audioVoices) {
             try {
                 voice.__syncAudio();
             } catch (error) {
@@ -1874,7 +1992,7 @@
     }
 
     function audioTick() {
-        if (!audioVoices.size) return;
+        if (!audioVoices.size || automatingParams === 0) return;
         syncAudioGraph();
     }
 
@@ -1882,23 +2000,33 @@
         let gain = 1;
         let pan = 0;
         let reached = false;
-        const stack = [];
-        for (const out of node.__outs) stack.push({ node: out, gain: 1, pan: 0, panSet: false });
-        const visited = new Set();
-        while (stack.length) {
-            const entry = stack.pop();
-            const current = entry.node;
-            if (!current || visited.has(current)) continue;
-            visited.add(current);
+        graphNodes.length = 0;
+        graphGains.length = 0;
+        graphPans.length = 0;
+        graphPanSet.length = 0;
+        graphVisited.clear();
+        for (const out of node.__outs) {
+            graphNodes.push(out);
+            graphGains.push(1);
+            graphPans.push(0);
+            graphPanSet.push(false);
+        }
+        while (graphNodes.length) {
+            const current = graphNodes.pop();
+            const entryGain = graphGains.pop();
+            const entryPan = graphPans.pop();
+            const entryPanSet = graphPanSet.pop();
+            if (!current || graphVisited.has(current)) continue;
+            graphVisited.add(current);
             if (current.__isDestination) {
                 reached = true;
-                gain *= entry.gain;
-                if (entry.panSet) pan = entry.pan;
+                gain *= entryGain;
+                if (entryPanSet) pan = entryPan;
                 continue;
             }
-            let nextGain = entry.gain;
-            let nextPan = entry.pan;
-            let panSet = entry.panSet;
+            let nextGain = entryGain;
+            let nextPan = entryPan;
+            let panSet = entryPanSet;
             if (current instanceof GainNode) {
                 nextGain *= current.gain.__currentValue();
             }
@@ -1907,7 +2035,10 @@
                 panSet = true;
             }
             for (const out of current.__outs) {
-                stack.push({ node: out, gain: nextGain, pan: nextPan, panSet });
+                graphNodes.push(out);
+                graphGains.push(nextGain);
+                graphPans.push(nextPan);
+                graphPanSet.push(panSet);
             }
         }
         return { gain: reached ? gain : 0, pan };
@@ -1918,6 +2049,7 @@
             this.__value = Number(value) || 0;
             this.__owner = owner || null;
             this.__events = [];
+            this.__automating = false;
         }
 
         get value() {
@@ -1926,8 +2058,21 @@
 
         set value(value) {
             this.__events = [];
+            this.__idle();
             this.__value = Number(value) || 0;
             this.__notify();
+        }
+
+        __wake() {
+            if (this.__automating) return;
+            this.__automating = true;
+            automatingParams++;
+        }
+
+        __idle() {
+            if (!this.__automating) return;
+            this.__automating = false;
+            automatingParams--;
         }
 
         __notify() {
@@ -1937,7 +2082,28 @@
         }
 
         __currentValue() {
-            return this.__valueAt(audioNow());
+            const now = audioNow();
+            this.__prune(now);
+            return this.__valueAt(now);
+        }
+
+        __prune(now) {
+            const events = this.__events;
+            if (!events.length) {
+                this.__idle();
+                return;
+            }
+            let lastPast = -1;
+            for (let index = 0; index < events.length; index++) {
+                if (events[index].time > now) break;
+                lastPast = index;
+            }
+            if (lastPast > 0) {
+                events.splice(0, lastPast);
+                lastPast = 0;
+            }
+            if (lastPast === events.length - 1) this.__idle();
+            else this.__wake();
         }
 
         __valueAt(now) {
@@ -1997,6 +2163,7 @@
         cancelScheduledValues(when) {
             const time = Number(when) || 0;
             this.__events = this.__events.filter((event) => event.time < time);
+            if (!this.__events.length) this.__idle();
             return this;
         }
 
@@ -2004,6 +2171,7 @@
             const time = Math.max(0, Number(when) || 0);
             this.__events.push({ type, value: Number(value) || 0, time });
             this.__events.sort((a, b) => a.time - b.time);
+            this.__wake();
             this.__notify();
         }
     }
@@ -2085,12 +2253,32 @@
             this.duration = this.length / this.sampleRate;
             this.__nativeId = Number(settings.__nativeId) || 0;
             this.__channels = null;
+            this.__releaseRegistered = false;
             if (!this.__nativeId) {
                 this.__channels = [];
                 for (let i = 0; i < this.numberOfChannels; i++) {
                     this.__channels.push(new Float32Array(this.length));
                 }
+            } else {
+                this.__registerRelease();
             }
+        }
+
+        __registerRelease() {
+            if (this.__releaseRegistered || this.__nativeId <= 0) return;
+            const id = this.__nativeId;
+            registerRelease(this, () => {
+                if (audioBridge && typeof audioBridge.freeBuffer === "function") {
+                    audioBridge.freeBuffer(id);
+                }
+            });
+            this.__releaseRegistered = true;
+        }
+
+        __disown() {
+            if (!this.__releaseRegistered) return;
+            unregisterRelease(this);
+            this.__releaseRegistered = false;
         }
 
         getChannelData(channel) {
@@ -2129,6 +2317,7 @@
                 }
             }
             this.__nativeId = audioBridge.uploadBuffer(this.sampleRate, channels, interleaved);
+            this.__registerRelease();
             return this.__nativeId;
         }
     }
@@ -2220,20 +2409,36 @@
             if (!buffer) return;
             const nativeId = buffer.__upload();
             if (!nativeId) return;
-            if (rendered) this.__ownedBuffers.push(nativeId);
+            if (rendered) {
+                buffer.__disown();
+                this.__ownedBuffers.push(nativeId);
+            }
             this.__renderedGraph = Boolean(rendered);
             const params = this.__renderedGraph ? { gain: 1, pan: 0 } : graphParams(this);
             const startFrame = this.__startTime > audioNow() ? this.__startTime * this.context.sampleRate : -1;
-            const voice = audioBridge.play(
-                nativeId,
-                params.gain,
-                params.pan,
-                this.playbackRate.__currentValue(),
-                this.loop,
-                rendered ? 0 : this.__offset,
-                startFrame,
-            );
-            if (voice < 0) return;
+            let voice;
+            try {
+                voice = audioBridge.play(
+                    nativeId,
+                    params.gain,
+                    params.pan,
+                    this.playbackRate.__currentValue(),
+                    this.loop,
+                    rendered ? 0 : this.__offset,
+                    startFrame,
+                );
+            } catch (error) {
+                for (const id of this.__ownedBuffers.splice(0)) {
+                    if (audioBridge && audioBridge.freeBuffer) audioBridge.freeBuffer(id);
+                }
+                throw error;
+            }
+            if (voice < 0) {
+                for (const id of this.__ownedBuffers.splice(0)) {
+                    if (audioBridge && audioBridge.freeBuffer) audioBridge.freeBuffer(id);
+                }
+                return;
+            }
             this.__voice = voice;
             audioVoices.add(this);
             if (this.__stopTime >= 0) {
@@ -2463,9 +2668,23 @@
             if (!buffer) return;
             const nativeId = buffer.__upload();
             if (!nativeId) return;
+            buffer.__disown();
             this.__ownedBuffers.push(nativeId);
-            const voice = audioBridge.play(nativeId, 1, 0, 1, this.__stopTime < 0, 0, this.__startTime > audioNow() ? this.__startTime * this.context.sampleRate : -1);
-            if (voice < 0) return;
+            let voice;
+            try {
+                voice = audioBridge.play(nativeId, 1, 0, 1, this.__stopTime < 0, 0, this.__startTime > audioNow() ? this.__startTime * this.context.sampleRate : -1);
+            } catch (error) {
+                for (const id of this.__ownedBuffers.splice(0)) {
+                    if (audioBridge && audioBridge.freeBuffer) audioBridge.freeBuffer(id);
+                }
+                throw error;
+            }
+            if (voice < 0) {
+                for (const id of this.__ownedBuffers.splice(0)) {
+                    if (audioBridge && audioBridge.freeBuffer) audioBridge.freeBuffer(id);
+                }
+                return;
+            }
             this.__voice = voice;
             audioVoices.add(this);
             if (this.__stopTime >= 0) audioBridge.stopAt(voice, this.__stopTime * this.context.sampleRate);
@@ -3390,6 +3609,7 @@
             this.__base = 0;
             this.__startedAt = 0;
             this.__nativeId = 0;
+            this.__generation = 0;
             this.__ready = null;
             this.__timer = 0;
             this.__readyTimer = 0;
@@ -3518,6 +3738,7 @@
         }
 
         load() {
+            this.__generation++;
             if (this.__nativeId) {
                 native.video.close(this.__nativeId);
                 this.__nativeId = 0;
@@ -3559,9 +3780,14 @@
                 return this.__ready;
             }
             const url = this.__src;
+            const generation = this.__generation;
             this.__networkState = 2;
-            this.__ready = this.__open(url)
+            this.__ready = this.__open(url, generation)
                 .then((info) => {
+                    if (generation !== this.__generation || this.__src !== url) {
+                        native.video.close(info.id);
+                        throw new Error("video source changed");
+                    }
                     this.__nativeId = info.id;
                     this.videoWidth = info.width;
                     this.videoHeight = info.height;
@@ -3573,6 +3799,7 @@
                     return info;
                 })
                 .catch((error) => {
+                    if (generation !== this.__generation || this.__src !== url) throw error;
                     this.__networkState = 3;
                     this.error = { code: 4, message: String((error && error.message) || error) };
                     throw error;
@@ -3580,19 +3807,22 @@
             return this.__ready;
         }
 
-        __open(url) {
+        __open(url, generation) {
             if (!native.video) return Promise.reject(new Error("video playback is not available"));
             const relative = isBundleAsset(url);
             if (relative && typeof native.video.openAsset === "function") {
                 const info = native.video.openAsset(url);
                 if (info) return Promise.resolve(info);
             }
+            const audio = this.__audio;
             return fetchResource(url)
                 .then((response) => response.arrayBuffer())
                 .then((bytes) => {
                     const info = native.video.open(bytesView(bytes));
                     if (!info) throw new Error("unsupported video: " + url);
-                    this.__audio.__adoptBytes(bytes).catch(() => {});
+                    if (generation === this.__generation && audio === this.__audio) {
+                        audio.__adoptBytes(bytes).catch(() => {});
+                    }
                     return info;
                 });
         }
@@ -3600,7 +3830,17 @@
         __startReadyTimer() {
             if (this.__readyTimer) return;
             this.__checkFrame();
-            this.__readyTimer = setIntervalFn(() => this.__checkFrame(), 100);
+            if (this.__readyTimer || (this.__dataFired && !this.__seekPending)) return;
+            let attempts = 0;
+            this.__readyTimer = setIntervalFn(() => {
+                if (++attempts > 100) {
+                    this.__stopReadyTimer();
+                    this.error = { code: 4, message: "video frame did not become ready" };
+                    this.__fire("error");
+                    return;
+                }
+                this.__checkFrame();
+            }, 100);
         }
 
         __stopReadyTimer() {
@@ -3823,7 +4063,7 @@
     };
 
     global.__kapNative_onVoiceEnded = function (voice) {
-        for (const node of Array.from(audioVoices)) {
+        for (const node of audioVoices) {
             if (node.__voice === voice) {
                 audioVoices.delete(node);
                 node.__voice = -1;
@@ -4127,9 +4367,27 @@
 
     const createdElements = new Set();
 
-    function registerElement(element) {
-        createdElements.add(element);
-        return element;
+    function registerTree(element) {
+        if (!element || typeof element !== "object") return;
+        if (
+            typeof element.tagName === "string"
+            && element !== documentElement
+            && element !== head
+            && element !== body
+        ) {
+            createdElements.add(element);
+        }
+        if (Array.isArray(element.children)) {
+            for (const child of element.children) registerTree(child);
+        }
+    }
+
+    function unregisterTree(element) {
+        if (!element || typeof element !== "object") return;
+        createdElements.delete(element);
+        if (Array.isArray(element.children)) {
+            for (const child of element.children) unregisterTree(child);
+        }
     }
 
     function isAttached(element) {
@@ -4234,6 +4492,7 @@
             } else {
                 child.parentElement = this;
             }
+            registerTree(child);
         }
 
         appendChild(child) {
@@ -4271,6 +4530,8 @@
         removeChild(child) {
             const index = this.children.indexOf(child);
             if (index >= 0) this.children.splice(index, 1);
+            unregisterTree(child);
+            if (child === mainCanvas) mainCanvas = null;
             if (child instanceof HTMLCanvasElement) child.__parent = null;
             else if (child) child.parentElement = null;
             if (child instanceof HTMLElement && (document.activeElement === child || child.contains(document.activeElement))) {
@@ -4553,13 +4814,13 @@
         },
         createElement(tag) {
             const name = String(tag).toLowerCase();
-            if (name === "canvas") return registerElement(new HTMLCanvasElement());
-            if (name === "video") return registerElement(new HTMLVideoElement());
+            if (name === "canvas") return new HTMLCanvasElement();
+            if (name === "video") return new HTMLVideoElement();
             if (name === "audio") return new HTMLAudioElement();
-            if (name === "input") return registerElement(new HTMLInputElement(name));
-            if (name === "textarea") return registerElement(new HTMLTextAreaElement(name));
-            if (name === "form") return registerElement(new HTMLFormElement(name));
-            const element = registerElement(new HTMLElement(name));
+            if (name === "input") return new HTMLInputElement(name);
+            if (name === "textarea") return new HTMLTextAreaElement(name);
+            if (name === "form") return new HTMLFormElement(name);
+            const element = new HTMLElement(name);
             if (name === "link") element.relList = { supports: (value) => value === "modulepreload" };
             return element;
         },
@@ -4590,7 +4851,8 @@
         getElementsByClassName(name) {
             const wanted = String(name);
             return Array.from(createdElements).filter((element) =>
-                String(element.className).split(/\s+/).includes(wanted),
+                isAttached(element)
+                && String(element.className).split(/\s+/).includes(wanted),
             );
         },
         querySelector(selector) {
@@ -4745,6 +5007,10 @@
     });
 
     const gamepadObjects = new Map();
+    let gamepadRevision = -1;
+    let gamepadSnapshotCache = null;
+    let gamepadArrayRevision = -1;
+    let gamepadArrayCache = null;
 
     class Gamepad {
         constructor(data) {
@@ -4780,11 +5046,30 @@
         return gamepad;
     }
 
+    function gamepadRevisionNow() {
+        if (!native.gamepad || typeof native.gamepad.revision !== "function") return null;
+        try {
+            return native.gamepad.revision();
+        } catch (error) {
+            reportError(error);
+            return null;
+        }
+    }
+
     function nativeGamepads() {
         if (!native.gamepad || typeof native.gamepad.list !== "function") return [];
+        const revision = gamepadRevisionNow();
+        if (revision !== null && revision === gamepadRevision && gamepadSnapshotCache) {
+            return gamepadSnapshotCache;
+        }
         try {
             const list = JSON.parse(native.gamepad.list());
-            return Array.isArray(list) ? list : [];
+            const snapshots = Array.isArray(list) ? list : [];
+            if (revision !== null) {
+                gamepadRevision = revision;
+                gamepadSnapshotCache = snapshots;
+            }
+            return snapshots;
         } catch (error) {
             reportError(error);
             return [];
@@ -4792,6 +5077,10 @@
     }
 
     function gamepadsArray() {
+        const revision = gamepadRevisionNow();
+        if (revision !== null && revision === gamepadArrayRevision && gamepadArrayCache) {
+            return gamepadArrayCache;
+        }
         const gamepads = [];
         for (const data of nativeGamepads()) {
             const gamepad = gamepadFromSnapshot(data);
@@ -4799,6 +5088,10 @@
         }
         for (let index = 0; index < gamepads.length; index++) {
             if (!(index in gamepads)) gamepads[index] = null;
+        }
+        if (revision !== null) {
+            gamepadArrayRevision = revision;
+            gamepadArrayCache = gamepads;
         }
         return gamepads;
     }
@@ -4812,6 +5105,10 @@
         });
         gamepad.connected = false;
         gamepadObjects.delete(index);
+        gamepadRevision = -1;
+        gamepadSnapshotCache = null;
+        gamepadArrayRevision = -1;
+        gamepadArrayCache = null;
         return gamepad;
     }
 
@@ -5212,7 +5509,7 @@
         const headers = options.headers instanceof Headers
             ? options.headers
             : new Headers(options.headers || {});
-        const body = copyBytes(bytes);
+        const body = bytesView(bytes);
         const statusText = options.statusText === undefined
             ? (status === 200 ? "OK" : "")
             : String(options.statusText);
@@ -5581,7 +5878,7 @@
     global.clearTimeout = clearTimer;
     global.setInterval = setIntervalFn;
     global.clearInterval = clearTimer;
-    global.performance = { now: () => native.env.now() };
+    global.performance = { now: () => timerNow() };
     global.kaplayjs_assetsAliases = {};
     global.onerror = null;
 
