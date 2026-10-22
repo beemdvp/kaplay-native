@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use ttf_parser::OutlineBuilder;
 
@@ -55,10 +57,20 @@ pub struct StrokeSpec {
     pub line_join: tiny_skia::LineJoin,
 }
 
+type FaceData = Option<(Arc<[u8]>, u32)>;
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct FaceKey {
+    family: String,
+    weight: u16,
+    style: u8,
+}
+
 pub struct FontStore {
     system: fontdb::Database,
     custom: HashMap<String, Vec<u8>>,
     default: Vec<u8>,
+    faces: RefCell<HashMap<FaceKey, FaceData>>,
 }
 
 impl FontStore {
@@ -69,6 +81,7 @@ impl FontStore {
             system,
             custom: HashMap::new(),
             default,
+            faces: RefCell::new(HashMap::new()),
         }
     }
 
@@ -150,12 +163,6 @@ impl FontStore {
     ) {
         let (size, family, weight, style) = parse_font(font);
         let fallback = ttf_parser::Face::parse(&self.default, 0).ok();
-        let metrics = self.measure(font, text);
-        let start_x = match align {
-            TextAlign::Left => x,
-            TextAlign::Center => x - metrics.width / 2.0,
-            TextAlign::Right => x - metrics.width,
-        };
 
         let _ = self.with_face(&family, weight, style, &mut |face| {
             let units = face.units_per_em() as f32;
@@ -167,6 +174,21 @@ impl FontStore {
                     y + (face.ascender() as f32 + face.descender() as f32) * scale / 2.0
                 }
                 Baseline::Bottom => y + face.descender() as f32 * scale,
+            };
+
+            let mut width = 0.0f32;
+            for character in text.chars() {
+                if let Some((glyph_face, glyph)) =
+                    resolve_glyph(&face, fallback.as_ref(), character)
+                {
+                    let glyph_scale = size / glyph_face.units_per_em() as f32;
+                    width += glyph_face.glyph_hor_advance(glyph).unwrap_or(0) as f32 * glyph_scale;
+                }
+            }
+            let start_x = match align {
+                TextAlign::Left => x,
+                TextAlign::Center => x - width / 2.0,
+                TextAlign::Right => x - width,
             };
 
             let mut paint = tiny_skia::Paint {
@@ -221,13 +243,37 @@ impl FontStore {
             }
         }
 
-        let generic = generic_family(family.as_str());
-        let weight = if weight >= 600 {
+        let key = FaceKey {
+            family: family.clone(),
+            weight,
+            style,
+        };
+        let cached = self.faces.borrow().get(&key).cloned();
+        let cached = match cached {
+            Some(value) => value,
+            None => {
+                let value = self.face_data(&key);
+                self.faces.borrow_mut().insert(key, value.clone());
+                value
+            }
+        };
+        if let Some((data, index)) = cached {
+            if let Ok(face) = ttf_parser::Face::parse(data.as_ref(), index) {
+                return Some(callback(face));
+            }
+        }
+
+        ttf_parser::Face::parse(&self.default, 0).ok().map(callback)
+    }
+
+    fn face_data(&self, key: &FaceKey) -> Option<(Arc<[u8]>, u32)> {
+        let generic = generic_family(key.family.as_str());
+        let weight = if key.weight >= 600 {
             fontdb::Weight::BOLD
         } else {
             fontdb::Weight::NORMAL
         };
-        let style = if style == 1 || style == 2 {
+        let style = if key.style == 1 || key.style == 2 {
             fontdb::Style::Italic
         } else {
             fontdb::Style::Normal
@@ -238,18 +284,12 @@ impl FontStore {
             stretch: fontdb::Stretch::Normal,
             style,
         };
-        if let Some(id) = self.system.query(&query) {
-            let found = self.system.with_face_data(id, |data, index| {
-                ttf_parser::Face::parse(data, index)
-                    .ok()
-                    .map(&mut *callback)
-            });
-            if let Some(result) = found.flatten() {
-                return Some(result);
-            }
-        }
-
-        ttf_parser::Face::parse(&self.default, 0).ok().map(callback)
+        let id = self.system.query(&query)?;
+        let mut data = None;
+        self.system.with_face_data(id, |bytes, index| {
+            data = Some((Arc::from(bytes), index));
+        });
+        data
     }
 }
 

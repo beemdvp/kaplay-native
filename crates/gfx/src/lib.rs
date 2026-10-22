@@ -47,6 +47,8 @@ pub struct GlState {
     framebuffers: HashMap<u32, glow::Framebuffer>,
     renderbuffers: HashMap<u32, glow::Renderbuffer>,
     uniform_locations: HashMap<u32, glow::UniformLocation>,
+    uniform_cache: HashMap<u32, HashMap<String, i32>>,
+    attrib_cache: HashMap<u32, HashMap<String, i32>>,
     shader_logs: HashMap<u32, String>,
     flip_y: bool,
     premultiply: bool,
@@ -101,6 +103,8 @@ impl GlState {
             framebuffers: HashMap::new(),
             renderbuffers: HashMap::new(),
             uniform_locations: HashMap::new(),
+            uniform_cache: HashMap::new(),
+            attrib_cache: HashMap::new(),
             shader_logs: HashMap::new(),
             flip_y: false,
             premultiply: false,
@@ -728,6 +732,7 @@ impl GlState {
     }
 
     pub fn delete_program(&mut self, handle: u32) {
+        self.invalidate_program(handle);
         if let Some(program) = self.programs.remove(&handle) {
             unsafe { self.gl.delete_program(program) };
         }
@@ -750,6 +755,7 @@ impl GlState {
     }
 
     pub fn link_program(&mut self, handle: u32) {
+        self.invalidate_program(handle);
         if let Some(program) = self.programs.get(&handle).copied() {
             unsafe { self.gl.link_program(program) };
         }
@@ -781,25 +787,56 @@ impl GlState {
     }
 
     pub fn get_attrib_location(&mut self, program: u32, name: &str) -> i32 {
-        self.programs
+        if let Some(location) = self
+            .attrib_cache
             .get(&program)
-            .copied()
-            .and_then(|program| unsafe { self.gl.get_attrib_location(program, name) })
-            .map(|location| location as i32)
-            .unwrap_or(-1)
+            .and_then(|cache| cache.get(name))
+        {
+            return *location;
+        }
+        let Some(native) = self.programs.get(&program).copied() else {
+            return -1;
+        };
+        let location = unsafe { self.gl.get_attrib_location(native, name) }
+            .map_or(-1, |location| location as i32);
+        self.attrib_cache
+            .entry(program)
+            .or_default()
+            .insert(name.to_string(), location);
+        location
     }
 
     pub fn get_uniform_location(&mut self, program: u32, name: &str) -> i32 {
-        let Some(program) = self.programs.get(&program).copied() else {
+        if let Some(handle) = self
+            .uniform_cache
+            .get(&program)
+            .and_then(|cache| cache.get(name))
+        {
+            return *handle;
+        }
+        let Some(native) = self.programs.get(&program).copied() else {
             return -1;
         };
-        let Some(location) = (unsafe { self.gl.get_uniform_location(program, name) }) else {
+        let Some(location) = (unsafe { self.gl.get_uniform_location(native, name) }) else {
             return -1;
         };
         let handle = self.next_handle;
         self.next_handle += 1;
         self.uniform_locations.insert(handle, location);
+        self.uniform_cache
+            .entry(program)
+            .or_default()
+            .insert(name.to_string(), handle as i32);
         handle as i32
+    }
+
+    fn invalidate_program(&mut self, program: u32) {
+        if let Some(cache) = self.uniform_cache.remove(&program) {
+            for handle in cache.values() {
+                self.uniform_locations.remove(&(*handle as u32));
+            }
+        }
+        self.attrib_cache.remove(&program);
     }
 
     fn location(&self, handle: i32) -> Option<&glow::UniformLocation> {

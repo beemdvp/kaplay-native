@@ -62,6 +62,8 @@ pub struct Gamepads {
     gilrs: Option<Gilrs>,
     pads: HashMap<GamepadId, Pad>,
     json: String,
+    revision: u64,
+    last: Vec<GamepadSnapshot>,
 }
 
 impl Gamepads {
@@ -81,12 +83,18 @@ impl Gamepads {
             gilrs,
             pads: HashMap::new(),
             json: "[]".to_string(),
+            revision: 0,
+            last: Vec::new(),
         }
     }
 
     pub fn pump(&mut self, timestamp: f64) -> Vec<GamepadEvent> {
         let Some(gilrs) = self.gilrs.as_mut() else {
-            self.json = "[]".to_string();
+            if !self.last.is_empty() {
+                self.last.clear();
+                self.json = "[]".to_string();
+                self.revision = self.revision.wrapping_add(1);
+            }
             return Vec::new();
         };
         while gilrs.next_event().is_some() {}
@@ -140,13 +148,35 @@ impl Gamepads {
         }
 
         current.sort_by_key(|snapshot| snapshot.index);
-        self.json = serde_json::to_string(&current).unwrap_or_else(|_| "[]".to_string());
+        for (snapshot, previous) in current.iter_mut().zip(self.last.iter()) {
+            if same_state(snapshot, previous) {
+                snapshot.timestamp = previous.timestamp;
+            }
+        }
+        if current != self.last {
+            self.json = serde_json::to_string(&current).unwrap_or_else(|_| "[]".to_string());
+            self.revision = self.revision.wrapping_add(1);
+            self.last = current;
+        }
         events
     }
 
     pub fn json(&self) -> String {
         self.json.clone()
     }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+}
+
+fn same_state(left: &GamepadSnapshot, right: &GamepadSnapshot) -> bool {
+    left.id == right.id
+        && left.index == right.index
+        && left.connected == right.connected
+        && left.mapping == right.mapping
+        && left.axes == right.axes
+        && left.buttons == right.buttons
 }
 
 fn snapshot(gamepad: &Gamepad<'_>, timestamp: f64) -> GamepadSnapshot {
@@ -224,6 +254,28 @@ mod tests {
         assert_eq!(json["mapping"], "standard");
         assert_eq!(json["buttons"][0]["pressed"], true);
         assert_eq!(json["axes"][1], -1.0);
+    }
+
+    #[test]
+    fn state_checks_ignore_timestamps() {
+        let first = GamepadSnapshot {
+            id: "Test (STANDARD GAMEPAD)".to_string(),
+            index: 0,
+            connected: true,
+            mapping: "standard".to_string(),
+            timestamp: 1.0,
+            axes: vec![0.0, 0.0, 0.0, 0.0],
+            buttons: vec![GamepadButton {
+                pressed: false,
+                touched: false,
+                value: 0.0,
+            }],
+        };
+        let mut second = first.clone();
+        second.timestamp = 2.0;
+        assert!(same_state(&first, &second));
+        second.buttons[0].value = 0.5;
+        assert!(!same_state(&first, &second));
     }
 
     #[test]

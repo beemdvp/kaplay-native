@@ -63,6 +63,8 @@ pub struct HostState {
     pub steam: Rc<RefCell<Option<SteamApi>>>,
     pub updates: Arc<crate::updates::UpdateState>,
     pub gamepads: RefCell<Gamepads>,
+    pub screenshot: RefCell<Option<Vec<u8>>>,
+    pub canvas_png: RefCell<Option<(u32, Vec<u8>)>>,
 }
 
 impl HostState {
@@ -76,6 +78,74 @@ impl HostState {
 
     pub fn gamepad_json(&self) -> String {
         self.gamepads.borrow().json()
+    }
+
+    pub fn gamepad_revision(&self) -> u64 {
+        self.gamepads.borrow().revision()
+    }
+
+    pub fn free_image(&self, id: u32) {
+        self.images.borrow_mut().remove(&id);
+    }
+
+    pub fn screenshot_length(&self) -> i32 {
+        let mut cache = self.screenshot.borrow_mut();
+        if cache.is_none() {
+            let (width, height, pixels) = self.gl.borrow_mut().read_default_pixels_top_down();
+            *cache = crate::screenshots::encode_bytes(&pixels, width, height);
+        }
+        cache.as_ref().map_or(-1, |data| data.len() as i32)
+    }
+
+    pub fn copy_screenshot(&self, out: &mut [u8]) -> bool {
+        let mut cache = self.screenshot.borrow_mut();
+        if cache.is_none() {
+            let (width, height, pixels) = self.gl.borrow_mut().read_default_pixels_top_down();
+            *cache = crate::screenshots::encode_bytes(&pixels, width, height);
+        }
+        let Some(data) = cache.take() else {
+            return false;
+        };
+        let length = data.len().min(out.len());
+        out[..length].copy_from_slice(&data[..length]);
+        true
+    }
+
+    pub fn clear_screenshot(&self) {
+        self.screenshot.borrow_mut().take();
+    }
+
+    pub fn clear_canvas_png(&self) {
+        self.canvas_png.borrow_mut().take();
+    }
+
+    pub fn canvas_png_length(&self, id: u32) -> i32 {
+        let mut cache = self.canvas_png.borrow_mut();
+        let matches = cache.as_ref().is_some_and(|(handle, _)| *handle == id);
+        if !matches {
+            *cache = self.canvas.borrow().to_png(id).map(|data| (id, data));
+        }
+        cache
+            .as_ref()
+            .filter(|(handle, _)| *handle == id)
+            .map_or(-1, |(_, data)| data.len() as i32)
+    }
+
+    pub fn copy_canvas_png(&self, id: u32, out: &mut [u8]) -> bool {
+        let mut cache = self.canvas_png.borrow_mut();
+        let matches = cache.as_ref().is_some_and(|(handle, _)| *handle == id);
+        if !matches {
+            *cache = self.canvas.borrow().to_png(id).map(|data| (id, data));
+        }
+        let Some((handle, data)) = cache.take() else {
+            return false;
+        };
+        if handle != id {
+            return false;
+        }
+        let length = data.len().min(out.len());
+        out[..length].copy_from_slice(&data[..length]);
+        true
     }
 
     pub fn store_image(&self, width: u32, height: u32, pixels: Vec<u8>) -> u32 {
@@ -109,7 +179,7 @@ impl HostState {
     }
 
     pub fn open_video_asset(&self, path: &str) -> Option<VideoInfo> {
-        let Some(bytes) = self.assets.read(path) else {
+        let Some(bytes) = self.assets.read_uncached(path) else {
             log::warn!("video asset not found: {path}");
             return None;
         };
@@ -120,7 +190,10 @@ impl HostState {
         let Some(audio) = self.audio.as_ref() else {
             return;
         };
-        let bytes = self.assets.read(path).unwrap_or_else(|| Arc::from(&[][..]));
+        let bytes = self
+            .assets
+            .read_uncached(path)
+            .unwrap_or_else(|| Arc::from(&[][..]));
         audio.decode_async(request, bytes);
     }
 
@@ -172,7 +245,7 @@ impl HostState {
 
     pub fn decode_image(&self, bytes: &[u8]) -> Option<u32> {
         let image = image::load_from_memory(bytes).ok()?;
-        let rgba = image.to_rgba8();
+        let rgba = image.into_rgba8();
         Some(self.store_image(rgba.width(), rgba.height(), rgba.into_raw()))
     }
 

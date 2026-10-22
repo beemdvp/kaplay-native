@@ -100,6 +100,10 @@ export function installStub() {
             },
             width: (id) => images.get(id)?.width ?? -1,
             height: (id) => images.get(id)?.height ?? -1,
+            free: (id) => {
+                images.delete(id);
+                record("image.free", [id]);
+            },
         },
         font: {
             register: (family, bytes) => {
@@ -153,7 +157,12 @@ export function installStub() {
         },
         gl: {},
         gamepad: {
-            list: () => JSON.stringify(state.gamepads),
+            list: () => {
+                const value = JSON.stringify(state.gamepads);
+                record("gamepad.list", [value]);
+                return value;
+            },
+            revision: () => JSON.stringify(state.gamepads),
         },
         auth: {
             open: (url) => {

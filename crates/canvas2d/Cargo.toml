@@ -7,6 +7,7 @@ repository.workspace = true
 
 [dependencies]
 fontdb.workspace = true
+png.workspace = true
 thiserror.workspace = true
 tiny-skia.workspace = true
 ttf-parser.workspace = true

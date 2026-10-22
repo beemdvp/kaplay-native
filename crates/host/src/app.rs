@@ -169,7 +169,7 @@ struct Inner {
 }
 
 impl Inner {
-    fn mark(&self, phase: &str) {
+    fn mark(&self, phase: &'static str) {
         self.watchdog.mark(phase);
     }
 
@@ -347,10 +347,9 @@ impl Inner {
 
     fn dispatch(&self, event: &str, payload: serde_json::Value) {
         let payload = payload.to_string();
-        let event = event.to_string();
         let result = self.js.call_global(
             "__kapNative_dispatch",
-            &[JsArg::Str(&event), JsArg::Str(&payload)],
+            &[JsArg::Str(event), JsArg::Str(&payload)],
         );
         if let Err(error) = result {
             log::error!("dispatch {event}: {error}");
@@ -400,6 +399,8 @@ impl Inner {
             self.dispatch_resize(size);
         }
         self.pump_gamepads();
+        self.state.clear_screenshot();
+        self.state.clear_canvas_png();
         let network_start = std::time::Instant::now();
         self.pump_network();
         self.pump_auth();
@@ -728,6 +729,8 @@ impl HostApp {
             steam: self.steam.clone(),
             updates: self.config.updates.clone(),
             gamepads: std::cell::RefCell::new(crate::gamepad::Gamepads::new()),
+            screenshot: std::cell::RefCell::new(None),
+            canvas_png: std::cell::RefCell::new(None),
         });
 
         if self.config.fullscreen {

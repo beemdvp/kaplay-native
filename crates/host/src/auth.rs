@@ -3,7 +3,9 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+const AUTH_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 pub enum AuthEvent {
     Callback(String),
@@ -27,9 +29,10 @@ impl AuthServer {
         let shutdown = Arc::new(AtomicBool::new(false));
         let relay_url = format!("http://127.0.0.1:{port}/{token}/");
         let thread_shutdown = Arc::clone(&shutdown);
+        let deadline = Instant::now() + AUTH_TIMEOUT;
         std::thread::Builder::new()
             .name("auth-relay".to_string())
-            .spawn(move || serve(listener, &token, &page, &sender, &thread_shutdown))?;
+            .spawn(move || serve(listener, &token, &page, &sender, &thread_shutdown, deadline))?;
         Ok(Self {
             receiver,
             relay_url,
@@ -76,11 +79,16 @@ fn serve(
     page: &str,
     sender: &Sender<AuthEvent>,
     shutdown: &AtomicBool,
+    deadline: Instant,
 ) {
     let root = format!("/{token}/");
     let callback = format!("/{token}/callback");
     let cancel = format!("/{token}/cancel");
     while !shutdown.load(Ordering::Relaxed) {
+        if Instant::now() >= deadline {
+            let _ = sender.send(AuthEvent::Cancelled);
+            return;
+        }
         match listener.accept() {
             Ok((stream, _)) => {
                 if handle(stream, &root, page, &callback, &cancel, sender) {

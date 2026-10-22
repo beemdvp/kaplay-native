@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -19,32 +19,87 @@ pub enum PakError {
     UnsafeEntry(String),
 }
 
+const CACHE_LIMIT: usize = 64 * 1024 * 1024;
+
+#[derive(Debug)]
+struct EntryCache {
+    entries: HashMap<String, Arc<[u8]>>,
+    order: VecDeque<String>,
+    bytes: usize,
+    limit: usize,
+}
+
+impl EntryCache {
+    fn new(limit: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+            bytes: 0,
+            limit,
+        }
+    }
+
+    fn get(&self, name: &str) -> Option<Arc<[u8]>> {
+        self.entries.get(name).cloned()
+    }
+
+    fn insert(&mut self, name: &str, bytes: Arc<[u8]>) {
+        if bytes.len() > self.limit {
+            return;
+        }
+        if let Some(previous) = self.entries.insert(name.to_string(), Arc::clone(&bytes)) {
+            self.bytes = self.bytes.saturating_sub(previous.len());
+        } else {
+            self.order.push_back(name.to_string());
+        }
+        self.bytes += bytes.len();
+        while self.bytes > self.limit {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(removed) = self.entries.remove(&oldest) {
+                self.bytes = self.bytes.saturating_sub(removed.len());
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Archive {
     entries: HashMap<String, (usize, u64)>,
     zip: Mutex<zip::ZipArchive<Cursor<Arc<[u8]>>>>,
-    cache: Mutex<HashMap<String, Arc<[u8]>>>,
+    cache: Mutex<EntryCache>,
 }
 
 impl Archive {
     fn read(&self, name: &str) -> Option<Arc<[u8]>> {
         if let Ok(cache) = self.cache.lock() {
             if let Some(bytes) = cache.get(name) {
-                return Some(Arc::clone(bytes));
+                return Some(bytes);
             }
         }
+        let bytes = self.read_uncached(name)?;
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.insert(name, Arc::clone(&bytes));
+        }
+        Some(bytes)
+    }
+
+    fn read_uncached(&self, name: &str) -> Option<Arc<[u8]>> {
+        self.read_vec_uncached(name).map(Arc::from)
+    }
+
+    fn read_vec_uncached(&self, name: &str) -> Option<Vec<u8>> {
         let (index, _) = *self.entries.get(name)?;
         let mut zip = self.zip.lock().ok()?;
         let mut entry = zip.by_index(index).ok()?;
         let mut data = Vec::with_capacity(entry.size() as usize);
         entry.read_to_end(&mut data).ok()?;
-        drop(entry);
-        drop(zip);
-        let bytes: Arc<[u8]> = Arc::from(data);
-        if let Ok(mut cache) = self.cache.lock() {
-            cache.insert(name.to_string(), Arc::clone(&bytes));
-        }
-        Some(bytes)
+        Some(data)
+    }
+
+    fn read_text(&self, name: &str) -> Option<String> {
+        String::from_utf8(self.read_vec_uncached(name)?).ok()
     }
 }
 
@@ -93,7 +148,7 @@ impl AssetSource {
             archive: Some(Arc::new(Archive {
                 entries,
                 zip: Mutex::new(archive),
-                cache: Mutex::new(HashMap::new()),
+                cache: Mutex::new(EntryCache::new(CACHE_LIMIT)),
             })),
             directory: false,
         })
@@ -153,9 +208,30 @@ impl AssetSource {
         }
     }
 
+    pub fn read_uncached(&self, path: &str) -> Option<Arc<[u8]>> {
+        let key = normalize(path)?;
+        if self.directory {
+            let full = resolve_within(&self.root, self.canonical_root.as_deref(), &key)?;
+            std::fs::read(full).ok().map(Arc::from)
+        } else if let Some(archive) = &self.archive {
+            archive.read_uncached(&key)
+        } else {
+            self.files.get(&key).cloned()
+        }
+    }
+
     pub fn read_text(&self, path: &str) -> Option<String> {
-        self.read(path)
-            .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+        let key = normalize(path)?;
+        if self.directory {
+            let full = resolve_within(&self.root, self.canonical_root.as_deref(), &key)?;
+            let bytes = std::fs::read(full).ok()?;
+            String::from_utf8(bytes).ok()
+        } else if let Some(archive) = &self.archive {
+            archive.read_text(&key)
+        } else {
+            let bytes = self.files.get(&key)?;
+            String::from_utf8(bytes.to_vec()).ok()
+        }
     }
 
     pub fn file_count(&self) -> usize {
@@ -247,9 +323,22 @@ mod tests {
         assert!(!assets.is_directory());
         assert_eq!(assets.file_count(), 2);
         assert_eq!(&*assets.read("assets/bean.png").unwrap(), b"png");
+        assert_eq!(&*assets.read_uncached("assets/bean.png").unwrap(), b"png");
         assert!(assets.exists("game/main.js"));
         assert!(assets.read("missing.js").is_none());
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cache_evicts_oldest_entries() {
+        let mut cache = EntryCache::new(10);
+        cache.insert("first", Arc::from(&b"123456"[..]));
+        cache.insert("second", Arc::from(&b"789012"[..]));
+        assert!(cache.get("first").is_none());
+        assert_eq!(&*cache.get("second").unwrap(), b"789012");
+        cache.insert("too-large", Arc::from(&b"012345678901"[..]));
+        assert!(cache.get("too-large").is_none());
+        assert_eq!(cache.bytes, 6);
     }
 }

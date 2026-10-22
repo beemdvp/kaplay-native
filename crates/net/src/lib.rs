@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::net::TcpStream;
-use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -21,6 +21,10 @@ use tungstenite::{Error as SocketError, Utf8Bytes};
 pub const MAX_BODY: u64 = 64 * 1024 * 1024;
 const SOCKET_KEY: usize = 0;
 const FLUSH_POLL: Duration = Duration::from_millis(5);
+const EVENT_QUEUE: usize = 4096;
+const REQUEST_QUEUE: usize = 256;
+const SOCKET_QUEUE: usize = 256;
+const MAX_SOCKETS: usize = 64;
 
 #[derive(Debug, Clone)]
 pub struct HttpRequest {
@@ -67,22 +71,22 @@ enum FetchError {
 
 #[derive(Clone)]
 struct SocketHandle {
-    outgoing: Sender<SocketOut>,
+    outgoing: SyncSender<SocketOut>,
     poller: Arc<Poller>,
 }
 
 pub struct Network {
     events: Receiver<NetworkEvent>,
-    event_sender: Sender<NetworkEvent>,
-    requests: Sender<HttpRequest>,
+    event_sender: SyncSender<NetworkEvent>,
+    requests: SyncSender<HttpRequest>,
     sockets: Arc<Mutex<HashMap<u32, SocketHandle>>>,
 }
 
 impl Network {
     pub fn new(fetch_workers: usize) -> Network {
         let _ = rustls::crypto::ring::default_provider().install_default();
-        let (request_sender, request_receiver) = channel::<HttpRequest>();
-        let (event_sender, event_receiver) = channel::<NetworkEvent>();
+        let (request_sender, request_receiver) = sync_channel::<HttpRequest>(REQUEST_QUEUE);
+        let (event_sender, event_receiver) = sync_channel::<NetworkEvent>(EVENT_QUEUE);
         let queue = Arc::new(Mutex::new(request_receiver));
         let agent = Arc::new(new_agent());
         for index in 0..fetch_workers.max(1) {
@@ -105,7 +109,7 @@ impl Network {
     }
 
     pub fn fetch(&self, request: HttpRequest) -> bool {
-        self.requests.send(request).is_ok()
+        self.requests.try_send(request).is_ok()
     }
 
     pub fn drain(&self, limit: usize) -> Vec<NetworkEvent> {
@@ -119,24 +123,30 @@ impl Network {
         events
     }
 
-    pub fn open_socket(&self, id: u32, url: String) {
-        let (sender, receiver) = channel::<SocketOut>();
+    pub fn open_socket(&self, id: u32, url: String) -> bool {
+        let Ok(mut active) = self.sockets.lock() else {
+            return false;
+        };
+        if active.len() >= MAX_SOCKETS {
+            log::warn!("websocket limit of {MAX_SOCKETS} reached");
+            return false;
+        }
+        let (sender, receiver) = sync_channel::<SocketOut>(SOCKET_QUEUE);
         let poller = match Poller::new() {
             Ok(poller) => Arc::new(poller),
             Err(error) => {
                 log::error!("failed to create a socket poller: {error}");
-                return;
+                return false;
             }
         };
-        if let Ok(mut sockets) = self.sockets.lock() {
-            sockets.insert(
-                id,
-                SocketHandle {
-                    outgoing: sender,
-                    poller: Arc::clone(&poller),
-                },
-            );
-        }
+        active.insert(
+            id,
+            SocketHandle {
+                outgoing: sender,
+                poller: Arc::clone(&poller),
+            },
+        );
+        drop(active);
         let sockets = Arc::clone(&self.sockets);
         let events = self.event_sender.clone();
         let spawned = thread::Builder::new()
@@ -144,7 +154,12 @@ impl Network {
             .spawn(move || socket_worker(id, url, receiver, events, sockets, poller));
         if let Err(error) = spawned {
             log::error!("failed to start the socket thread: {error}");
+            if let Ok(mut sockets) = self.sockets.lock() {
+                sockets.remove(&id);
+            }
+            return false;
         }
+        true
     }
 
     pub fn send_text(&self, id: u32, text: String) {
@@ -166,7 +181,10 @@ impl Network {
             .ok()
             .and_then(|sockets| sockets.get(&id).cloned());
         if let Some(handle) = handle {
-            let _ = handle.outgoing.send(message);
+            if handle.outgoing.try_send(message).is_err() {
+                log::warn!("websocket send queue is full");
+                return;
+            }
             let _ = handle.poller.notify();
         }
     }
@@ -181,7 +199,7 @@ fn new_agent() -> ureq::Agent {
 
 fn fetch_worker(
     queue: Arc<Mutex<Receiver<HttpRequest>>>,
-    events: Sender<NetworkEvent>,
+    events: SyncSender<NetworkEvent>,
     agent: Arc<ureq::Agent>,
 ) {
     loop {
@@ -249,7 +267,7 @@ fn socket_worker(
     id: u32,
     url: String,
     outgoing: Receiver<SocketOut>,
-    events: Sender<NetworkEvent>,
+    events: SyncSender<NetworkEvent>,
     sockets: Arc<Mutex<HashMap<u32, SocketHandle>>>,
     poller: Arc<Poller>,
 ) {
@@ -374,7 +392,7 @@ fn socket_worker(
     }
 }
 
-fn fail_socket(events: &Sender<NetworkEvent>, id: u32, message: String) {
+fn fail_socket(events: &SyncSender<NetworkEvent>, id: u32, message: String) {
     let _ = events.send(NetworkEvent::SocketError { id, message });
     let _ = events.send(NetworkEvent::SocketClosed {
         id,
