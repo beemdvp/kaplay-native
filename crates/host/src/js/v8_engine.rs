@@ -462,6 +462,11 @@ impl Engine {
         0
     }
 
+    pub fn collect_garbage(&self) -> usize {
+        self.isolate.borrow_mut().low_memory_notification();
+        self.drain_jobs()
+    }
+
     pub fn call_global(&self, name: &str, args: &[JsArg<'_>]) -> Result<(), String> {
         let mut isolate = self.isolate.borrow_mut();
         isolate.cancel_terminate_execution();

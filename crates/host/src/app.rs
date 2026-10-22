@@ -581,9 +581,15 @@ impl HostApp {
         let event_loop = builder.build()?;
         event_loop.set_control_flow(ControlFlow::Poll);
         let result = event_loop.run_app(&mut self);
+        if self.config.resource_report.is_some() {
+            if let Some(inner) = self.inner.as_ref() {
+                inner.js.collect_garbage();
+            }
+        }
         self.log_frame_stats();
         self.write_bench_json();
         self.write_frame_trace();
+        self.write_resource_report();
         if let Some(api) = self.steam.borrow_mut().as_mut() {
             api.shutdown();
         }
@@ -932,6 +938,33 @@ impl HostApp {
         let bytes = serde_json::to_vec_pretty(&summary).unwrap_or_default();
         if let Err(error) = std::fs::write(path, bytes) {
             log::error!("bench json {}: {error}", path.display());
+        }
+    }
+
+    fn write_resource_report(&self) {
+        let Some(path) = self.config.resource_report.as_ref() else {
+            return;
+        };
+        let Some(inner) = self.inner.as_ref() else {
+            return;
+        };
+        let state = &inner.state;
+        let (canvases, contexts) = state.canvas.borrow().resource_counts();
+        let (uniforms, uniform_cache, attribs) = state.gl.borrow().resource_counts();
+        let audio_buffers = state.audio.as_ref().map_or(0, |audio| audio.buffer_count());
+        let report = json!({
+            "images": state.images.borrow().len(),
+            "videos": state.videos.borrow().len(),
+            "canvases": canvases,
+            "contexts": contexts,
+            "audio_buffers": audio_buffers,
+            "uniform_locations": uniforms,
+            "uniform_cache": uniform_cache,
+            "attrib_cache": attribs,
+        });
+        let bytes = serde_json::to_vec_pretty(&report).unwrap_or_default();
+        if let Err(error) = std::fs::write(path, bytes) {
+            log::error!("resource report {}: {error}", path.display());
         }
     }
 

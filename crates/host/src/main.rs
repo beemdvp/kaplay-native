@@ -56,6 +56,12 @@ struct Args {
         help = "Write the per-frame timings (last 10000 frames) as JSON before exiting"
     )]
     frame_trace: Option<PathBuf>,
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Write native resource counts as JSON before exiting"
+    )]
+    resource_report: Option<PathBuf>,
     #[arg(long, help = "Directory for the localStorage save file")]
     save_dir: Option<PathBuf>,
     #[arg(long, help = "Allow http(s) requests (disabled by default)")]
@@ -245,6 +251,7 @@ fn main() -> anyhow::Result<()> {
         screenshot_raw: args.screenshot_raw,
         bench_json: args.bench_json,
         frame_trace: args.frame_trace,
+        resource_report: args.resource_report,
         save_dir,
         game_name: args
             .title

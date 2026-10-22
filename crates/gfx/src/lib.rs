@@ -830,6 +830,14 @@ impl GlState {
         handle as i32
     }
 
+    pub fn resource_counts(&self) -> (usize, usize, usize) {
+        (
+            self.uniform_locations.len(),
+            self.uniform_cache.values().map(HashMap::len).sum(),
+            self.attrib_cache.values().map(HashMap::len).sum(),
+        )
+    }
+
     fn invalidate_program(&mut self, program: u32) {
         if let Some(cache) = self.uniform_cache.remove(&program) {
             for handle in cache.values() {

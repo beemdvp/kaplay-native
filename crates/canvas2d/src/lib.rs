@@ -78,6 +78,10 @@ impl Canvas2d {
             .map(|canvas| canvas.pixmap.data())
     }
 
+    pub fn resource_counts(&self) -> (usize, usize) {
+        (self.canvases.len(), self.contexts.len())
+    }
+
     pub fn destroy_canvas(&mut self, handle: u32) {
         self.canvases.remove(&handle);
         self.contexts.retain(|_, context| context.canvas != handle);
@@ -576,6 +580,15 @@ mod tests {
         let canvas = store.create_canvas(32, 16);
         let context = store.create_context(canvas).unwrap();
         (store, canvas, context)
+    }
+
+    #[test]
+    fn destroys_canvas_and_its_contexts() {
+        let (mut store, canvas, _context) = setup();
+        assert_eq!(store.resource_counts(), (1, 1));
+        store.destroy_canvas(canvas);
+        assert_eq!(store.resource_counts(), (0, 0));
+        assert!(store.canvas_bytes(canvas).is_none());
     }
 
     #[test]

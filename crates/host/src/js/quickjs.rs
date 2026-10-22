@@ -16,7 +16,7 @@ use crate::state::HostState;
 pub const MAX_PENDING_JOBS: usize = 1_000_000;
 
 pub struct Engine {
-    _runtime: Runtime,
+    runtime: Runtime,
     context: Context,
 }
 
@@ -30,10 +30,7 @@ impl Engine {
         context
             .with(|ctx| bridge::quickjs::install(&ctx, state, shim))
             .map_err(|error| error.to_string())?;
-        Ok(Self {
-            _runtime: runtime,
-            context,
-        })
+        Ok(Self { runtime, context })
     }
 
     pub fn eval_module(&self, name: &str, source: &str) -> Result<(), String> {
@@ -60,6 +57,11 @@ impl Engine {
             }
             jobs
         })
+    }
+
+    pub fn collect_garbage(&self) -> usize {
+        self.runtime.run_gc();
+        self.drain_jobs()
     }
 
     pub fn call_global(&self, name: &str, args: &[JsArg<'_>]) -> Result<(), String> {

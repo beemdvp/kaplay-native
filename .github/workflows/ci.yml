@@ -221,3 +221,24 @@ jobs:
         with:
           name: kaplay-native-host-windows-x86_64
           path: target/release/kaplay-native-host.exe
+
+  leak:
+    name: Resource leaks (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
+            libxi-dev libxcursor-dev libxrandr-dev libgl1-mesa-dev libxkbcommon-x11-0 libudev-dev \
+            xvfb
+      - run: cargo build --release -p kaplay-native-host
+      - name: Check native resource counts
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: xvfb-run -a node scripts/leak-check.mjs --host target/release/kaplay-native-host

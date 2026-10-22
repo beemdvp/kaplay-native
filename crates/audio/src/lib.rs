@@ -377,6 +377,13 @@ impl Audio {
         count
     }
 
+    pub fn buffer_count(&self) -> usize {
+        self.shared
+            .buffers
+            .lock()
+            .map_or(0, |buffers| buffers.len())
+    }
+
     pub fn free_buffer(&self, id: u32) {
         if let Ok(mut buffers) = self.shared.buffers.lock() {
             buffers.remove(&id);

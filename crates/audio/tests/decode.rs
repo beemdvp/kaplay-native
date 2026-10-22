@@ -53,6 +53,7 @@ fn uploads_and_reads_channels() {
     let audio = kaplay_native_audio::Audio::silent();
     let samples = vec![0.5f32, -0.5, 0.25, -0.25];
     let id = audio.upload_buffer(48000, 2, samples);
+    assert_eq!(audio.buffer_count(), 1);
     assert_eq!(audio.buffer_info(id), Some((48000, 2, 2)));
     let mut channel = [0.0f32; 4];
     assert_eq!(audio.read_channel(id, 0, &mut channel), 2);
@@ -60,5 +61,6 @@ fn uploads_and_reads_channels() {
     assert_eq!(audio.read_channel(id, 1, &mut channel), 2);
     assert_eq!(&channel[..2], &[-0.5, -0.25]);
     audio.free_buffer(id);
+    assert_eq!(audio.buffer_count(), 0);
     assert_eq!(audio.buffer_info(id), None);
 }

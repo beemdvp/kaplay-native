@@ -212,6 +212,15 @@ impl JsRuntime {
         }
     }
 
+    pub fn collect_garbage(&self) -> usize {
+        match &self.backend {
+            #[cfg(feature = "quickjs")]
+            Backend::QuickJs(engine) => engine.collect_garbage(),
+            #[cfg(feature = "v8")]
+            Backend::V8(engine) => engine.collect_garbage(),
+        }
+    }
+
     pub fn call_global(&self, name: &str, args: &[JsArg<'_>]) -> Result<(), String> {
         match &self.backend {
             #[cfg(feature = "quickjs")]
