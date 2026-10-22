@@ -117,3 +117,11 @@ and its tests are in place.
 
 The shim test script was also corrected to point at `test/shim.test.js`, since
 `node --test test` no longer accepts a directory on the current Node release.
+
+## Automated regression check
+
+- `scripts/leak-check.mjs` runs light and heavy churn scenarios against the
+  release host and compares native resource counts after a forced GC.
+- It covers image bitmaps, canvases and their contexts, uniform locations, and
+  decoded audio buffers.
+- The Linux `Resource leaks` CI job runs it under Xvfb with software OpenGL.
