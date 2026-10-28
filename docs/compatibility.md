@@ -43,8 +43,12 @@ missing.
   selectors. Inline scripts and CSS are not executed.
 - `createElement`, `createTextNode`, `getElementById`, `getElementsByTagName`,
   `getElementsByClassName`, `querySelector`, `appendChild`, `prepend`,
-  `removeChild`, `insertBefore`, `setAttribute` for `div`, `input`, `textarea`,
-  and `form` elements
+  `removeChild`, `insertBefore`, `setAttribute` for `div`, `img`, `input`,
+  `textarea`, and `form` elements
+- `HTMLImageElement` through `new Image(width, height)` and
+  `document.createElement("img")`, so `instanceof HTMLImageElement` checks in
+  games and rendering helpers resolve. `ImageBitmap` is defined for the same
+  feature checks; `createImageBitmap` itself is not implemented.
 - `Event`, `MouseEvent`, `KeyboardEvent`, `WheelEvent`, and `CustomEvent`
 - canvas creation, `appendChild`, `getBoundingClientRect`
 - `style` as a flat CSS property bag: direct properties, `cssText`,
@@ -115,9 +119,9 @@ browser cannot be started, or for non-`http(s)` URLs.
 `clearRect`, `fillRect` and `strokeRect` (no-ops used by KAPLAY's background
 helpers), `fillText`, `strokeText`, `measureText` (width plus
 `actualBoundingBoxAscent`/`Descent`), `drawImage` in 3, 5, and 9 argument
-forms, `getImageData`, `putImageData`, style setters, and `toDataURL`/`toBlob`
-backed by the native surfaces. Path helpers exist as no-ops so accidental use
-does not throw.
+forms, `getImageData`, `putImageData`, `createImageData`, style setters, and
+`toDataURL`/`toBlob` backed by the native surfaces. Path helpers exist as no-ops
+so accidental use does not throw.
 
 ## WebGL 1
 

@@ -496,6 +496,15 @@
             }
         }
 
+        createImageData(width, height) {
+            if (width instanceof ImageData) {
+                return new ImageData(new Uint8ClampedArray(width.data), width.width, width.height);
+            }
+            const w = Math.max(0, Math.floor(Number(width) || 0));
+            const h = Math.max(0, Math.floor(Number(height) || 0));
+            return new ImageData(w, h);
+        }
+
         getImageData(x, y, width, height) {
             const w = Math.max(0, Math.floor(Number(width) || 0));
             const h = Math.max(0, Math.floor(Number(height) || 0));
@@ -1408,8 +1417,15 @@
 
     // ------------------------------------------------------------------ images
 
-    class Image {
+    // Games classify texture sources with `instanceof HTMLImageElement`;
+    // `Image` is the concrete element type in this shim.
+    class HTMLImageElement {}
+
+    class Image extends HTMLImageElement {
         constructor(width, height) {
+            super();
+            this.tagName = "IMG";
+            this.nodeName = "IMG";
             this.__id = -1;
             this.__load = 0;
             this._src = "";
@@ -1531,6 +1547,20 @@
                 .then((response) => response.arrayBuffer())
                 .then((buffer) => apply(new Uint8Array(buffer)))
                 .catch(fail);
+        }
+    }
+
+    // Exposed for `instanceof` feature checks only; `createImageBitmap` is not
+    // implemented, so this class is never produced by the runtime.
+    class ImageBitmap {
+        constructor(width, height) {
+            this.width = Number(width) || 0;
+            this.height = Number(height) || 0;
+            this.__closed = false;
+        }
+
+        close() {
+            this.__closed = true;
         }
     }
 
@@ -4815,6 +4845,7 @@
         createElement(tag) {
             const name = String(tag).toLowerCase();
             if (name === "canvas") return new HTMLCanvasElement();
+            if (name === "img") return new Image();
             if (name === "video") return new HTMLVideoElement();
             if (name === "audio") return new HTMLAudioElement();
             if (name === "input") return new HTMLInputElement(name);
@@ -5799,6 +5830,8 @@
     define("console", console);
     define("localStorage", localStorage);
     define("Image", Image);
+    define("HTMLImageElement", HTMLImageElement);
+    define("ImageBitmap", ImageBitmap);
     define("ImageData", ImageData);
     define("Gamepad", Gamepad);
     define("Blob", Blob);
