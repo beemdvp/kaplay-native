@@ -190,6 +190,32 @@ test("images report errors for unknown sources", () => {
     assert.equal(error, true);
 });
 
+test("image constructors support instanceof feature checks", () => {
+    const image = new Image(16, 8);
+    assert.ok(image instanceof HTMLImageElement);
+    assert.ok(!(image instanceof ImageBitmap));
+
+    const created = document.createElement("img");
+    assert.ok(created instanceof Image);
+    assert.ok(created instanceof HTMLImageElement);
+    assert.equal(created.tagName, "IMG");
+
+    const bitmap = new ImageBitmap(32, 64);
+    assert.equal(bitmap.width, 32);
+    assert.equal(bitmap.height, 64);
+    bitmap.close();
+    assert.equal(bitmap.__closed, true);
+
+    // The check a game uses to classify a sprite texture must not throw.
+    assert.equal(
+        image instanceof HTMLImageElement ||
+            image instanceof HTMLCanvasElement ||
+            image instanceof HTMLVideoElement ||
+            image instanceof ImageBitmap,
+        true,
+    );
+});
+
 test("local storage persists through the native bridge", () => {
     window.localStorage["highscore"] = JSON.stringify(4200);
     assert.equal(window.localStorage["highscore"], "4200");
@@ -332,6 +358,23 @@ test("canvas 2d contexts proxy to native calls", () => {
     const put = stub.calls.filter((entry) => entry.name === "canvas.putImageData").at(-1);
     assert.deepEqual(put.args.slice(0, 5), [put.args[0], 4, 5, 2, 2]);
     assert.ok(put.args[5] instanceof Uint8Array);
+});
+
+test("canvas 2d createImageData allocates and copies pixel buffers", () => {
+    const context = document.createElement("canvas").getContext("2d");
+    const image = context.createImageData(2, 3);
+    assert.ok(image instanceof ImageData);
+    assert.equal(image.width, 2);
+    assert.equal(image.height, 3);
+    assert.equal(image.data.length, 24);
+    assert.equal(image.data[0], 0);
+
+    image.data[0] = 255;
+    const copy = context.createImageData(image);
+    assert.notEqual(copy, image);
+    assert.equal(copy.width, 2);
+    assert.equal(copy.height, 3);
+    assert.equal(copy.data[0], 255);
 });
 
 test("canvas 2d drawImage forwards the right number of arguments", () => {
