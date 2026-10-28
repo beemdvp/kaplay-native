@@ -1465,7 +1465,7 @@ dependencies = [
 
 [[package]]
 name = "kaplay-native-audio"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "cpal",
  "criterion",
@@ -1479,7 +1479,7 @@ dependencies = [
 
 [[package]]
 name = "kaplay-native-canvas2d"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "criterion",
  "fontdb",
@@ -1491,7 +1491,7 @@ dependencies = [
 
 [[package]]
 name = "kaplay-native-gfx"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "glow",
  "glutin",
@@ -1503,7 +1503,7 @@ dependencies = [
 
 [[package]]
 name = "kaplay-native-host"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "anyhow",
  "base64",
@@ -1538,7 +1538,7 @@ dependencies = [
 
 [[package]]
 name = "kaplay-native-net"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "criterion",
  "log",
@@ -1552,7 +1552,7 @@ dependencies = [
 
 [[package]]
 name = "kaplay-native-pak"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "criterion",
  "thiserror 2.0.21",
@@ -1561,7 +1561,7 @@ dependencies = [
 
 [[package]]
 name = "kaplay-native-steam"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "libloading",
  "log",
@@ -1571,7 +1571,7 @@ dependencies = [
 
 [[package]]
 name = "kaplay-native-video"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "criterion",
  "rusty_h264-common",
