@@ -455,10 +455,27 @@ impl Engine {
     pub fn drain_jobs(&self) -> usize {
         let mut isolate = self.isolate.borrow_mut();
         isolate.cancel_terminate_execution();
-        v8::scope!(let scope, &mut *isolate);
-        let context = Local::new(scope, &self.context);
-        let scope = &mut ContextScope::new(scope, context);
-        scope.perform_microtask_checkpoint();
+        // A microtask that re-queues itself would otherwise spin inside one
+        // checkpoint forever. Arm a deadline on a background thread (the same
+        // mechanism as the watchdog) so a runaway queue is terminated instead
+        // of hanging the frame; legitimate drains finish in microseconds and
+        // never hit it.
+        let handle = isolate.thread_safe_handle();
+        let deadline = std::time::Instant::now() + Duration::from_secs(4);
+        let guard = DeadlineGuard::arm(handle, deadline);
+        let terminated = {
+            v8::scope!(let scope, &mut *isolate);
+            let context = Local::new(scope, &self.context);
+            let scope = &mut ContextScope::new(scope, context);
+            v8::tc_scope!(let caught, scope);
+            caught.perform_microtask_checkpoint();
+            caught.has_terminated()
+        };
+        guard.disarm();
+        if terminated {
+            isolate.cancel_terminate_execution();
+            log::error!("stopped a runaway microtask queue after 4 s");
+        }
         0
     }
 
@@ -593,6 +610,49 @@ fn js_value<'s>(scope: &v8::PinScope<'s, '_>, arg: &JsArg<'_>) -> Local<'s, v8::
     }
 }
 
+/// Terminates execution if a deadline passes before `disarm`. Used to bound
+/// microtask checkpoints, which have no job-count limit of their own.
+struct DeadlineGuard {
+    disarmed: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl DeadlineGuard {
+    fn arm(handle: v8::IsolateHandle, deadline: std::time::Instant) -> Self {
+        let disarmed = Arc::new(AtomicBool::new(false));
+        let thread_disarmed = Arc::clone(&disarmed);
+        let thread = std::thread::spawn(move || {
+            while !thread_disarmed.load(Ordering::Relaxed) {
+                if std::time::Instant::now() >= deadline {
+                    handle.terminate_execution();
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        Self {
+            disarmed,
+            thread: Some(thread),
+        }
+    }
+
+    fn disarm(mut self) {
+        self.disarmed.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+impl Drop for DeadlineGuard {
+    fn drop(&mut self) {
+        self.disarmed.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
 struct WatchdogThread {
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -639,7 +699,9 @@ mod tests {
 
     use kaplay_native_pak::AssetSource;
 
-    use super::{clear_loader, eval_module_in, eval_preload_in, initialize, install_loader};
+    use super::{
+        clear_loader, eval_module_in, eval_preload_in, initialize, install_loader, DeadlineGuard,
+    };
 
     fn fixture(name: &str, files: &[(&str, &str)]) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("kap-v8-{name}-{}", std::process::id()));
@@ -681,6 +743,45 @@ mod tests {
         let source = v8::String::new(scope, expression).unwrap();
         let script = v8::Script::compile(scope, source, None).unwrap();
         script.run(scope).unwrap().to_rust_string_lossy(scope)
+    }
+
+    #[test]
+    fn deadline_guard_terminates_a_runaway_microtask_queue() {
+        initialize();
+        let mut isolate = v8::Isolate::new(Default::default());
+        isolate.set_microtasks_policy(v8::MicrotasksPolicy::Explicit);
+        let handle = isolate.thread_safe_handle();
+        // A self-requeueing microtask would spin forever without the guard.
+        let guard = DeadlineGuard::arm(
+            handle,
+            std::time::Instant::now() + std::time::Duration::from_millis(100),
+        );
+        let terminated = {
+            v8::scope!(let scope, &mut isolate);
+            let context = v8::Context::new(scope, Default::default());
+            let scope = &mut v8::ContextScope::new(scope, context);
+            let source = v8::String::new(
+                scope,
+                "const loop = () => Promise.resolve().then(loop); loop();",
+            )
+            .unwrap();
+            let script = v8::Script::compile(scope, source, None).unwrap();
+            let _ = script.run(scope);
+            v8::tc_scope!(let caught, scope);
+            caught.perform_microtask_checkpoint();
+            caught.has_terminated()
+        };
+        guard.disarm();
+        assert!(terminated, "the checkpoint should have been terminated");
+        // After cancelling, the isolate must be usable again.
+        isolate.cancel_terminate_execution();
+        v8::scope!(let scope, &mut isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let source = v8::String::new(scope, "40 + 2").unwrap();
+        let script = v8::Script::compile(scope, source, None).unwrap();
+        let value = script.run(scope).unwrap();
+        assert_eq!(value.uint32_value(scope), Some(42));
     }
 
     #[test]

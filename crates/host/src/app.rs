@@ -808,7 +808,10 @@ impl HostApp {
             }
         }
         for source in preload_sources {
-            if let Err(error) = js.eval_preload(&source) {
+            watchdog.mark("preload");
+            let result = js.eval_preload(&source);
+            watchdog.unmark();
+            if let Err(error) = result {
                 log::error!("preload error: {error}");
                 event_loop.exit();
                 return None;
@@ -821,7 +824,10 @@ impl HostApp {
             event_loop.exit();
             return None;
         };
-        if let Err(error) = js.eval_module(&name, &source) {
+        watchdog.mark("boot");
+        let result = js.eval_module(&name, &source);
+        watchdog.unmark();
+        if let Err(error) = result {
             log::error!("script error: {error}");
             event_loop.exit();
             return None;
