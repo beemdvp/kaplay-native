@@ -18,6 +18,8 @@ use crate::bridge;
 use crate::state::HostState;
 
 static INIT: Once = Once::new();
+static PLATFORM: std::sync::Mutex<Option<v8::SharedRef<v8::Platform>>> =
+    std::sync::Mutex::new(None);
 
 macro_rules! exception_text {
     ($caught:expr) => {{
@@ -373,9 +375,20 @@ fn initialize() {
         }
         v8::V8::set_flags_from_string(&flags);
         let platform = v8::new_default_platform(0, false).make_shared();
-        v8::V8::initialize_platform(platform);
+        v8::V8::initialize_platform(platform.clone());
         v8::V8::initialize();
+        *PLATFORM.lock().unwrap() = Some(platform);
     });
+}
+
+/// Run pending V8 foreground tasks. FinalizationRegistry cleanup is scheduled
+/// as a platform task, not a microtask, so without this pump finalizers never
+/// fire and native resources leak even after a full GC.
+fn pump_platform_tasks(isolate: &v8::Isolate) {
+    let platform = PLATFORM.lock().unwrap().clone();
+    if let Some(platform) = platform {
+        while v8::Platform::pump_message_loop(&platform, isolate, false) {}
+    }
 }
 
 unsafe extern "C" fn promise_rejected(message: PromiseRejectMessage) {
@@ -476,11 +489,36 @@ impl Engine {
             isolate.cancel_terminate_execution();
             log::error!("stopped a runaway microtask queue after 4 s");
         }
+        // FinalizationRegistry cleanup runs as a foreground platform task;
+        // pump it so released JS objects actually free their native handles.
+        pump_platform_tasks(&isolate);
         0
     }
 
     pub fn collect_garbage(&self) -> usize {
-        self.isolate.borrow_mut().low_memory_notification();
+        // --expose-gc is always set, so call the full GC directly. A low
+        // memory notification only hints; it does not guarantee that
+        // FinalizationRegistry callbacks run, which the resource report and
+        // leak checks depend on. Two passes deliver finalizers queued by the
+        // first collection's cleanup.
+        {
+            let mut isolate = self.isolate.borrow_mut();
+            for _ in 0..2 {
+                {
+                    v8::scope!(let scope, &mut *isolate);
+                    let context = Local::new(scope, &self.context);
+                    let scope = &mut ContextScope::new(scope, context);
+                    let source = v8::String::new(scope, "gc()");
+                    if let Some(source) = source {
+                        if let Some(script) = v8::Script::compile(scope, source, None) {
+                            let _ = script.run(scope);
+                        }
+                    }
+                    scope.perform_microtask_checkpoint();
+                }
+                pump_platform_tasks(&isolate);
+            }
+        }
         self.drain_jobs()
     }
 
