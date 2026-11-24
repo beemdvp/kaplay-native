@@ -1022,6 +1022,11 @@ impl HostApp {
             || inner.state.updates.restart_requested()
             || self.config.frames.is_some_and(|limit| self.frames >= limit);
         if finished {
+            // Flush any debounced localStorage writes before the loop stops;
+            // window close and frame limits exit without another frame tick.
+            if let Err(error) = inner.js.call_global("__kapNative_flushStorage", &[]) {
+                log::debug!("storage flush: {error}");
+            }
             if let Some(path) = self.config.screenshot.clone() {
                 self.capture_screenshot(&path);
             }

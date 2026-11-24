@@ -222,11 +222,36 @@ test("image constructors support instanceof feature checks", () => {
 test("local storage persists through the native bridge", () => {
     window.localStorage["highscore"] = JSON.stringify(4200);
     assert.equal(window.localStorage["highscore"], "4200");
+    // Writes are debounced to the frame boundary, not issued per set.
+    assert.ok(!stub.calls.some((call) => call.name === "storage.save"
+        && call.args[0] === '{"highscore":"4200"}'));
+    drain();
     const saved = stub.calls.filter((call) => call.name === "storage.save").at(-1);
     assert.equal(saved.args[0], '{"highscore":"4200"}');
     assert.equal(window.localStorage.getItem("highscore"), "4200");
     window.localStorage.removeItem("highscore");
     assert.equal(window.localStorage.getItem("highscore"), null);
+    drain();
+});
+
+test("local storage coalesces many writes into one save per frame", () => {
+    const before = stub.calls.filter((call) => call.name === "storage.save").length;
+    for (let i = 0; i < 50; i++) window.localStorage.setItem("counter", String(i));
+    assert.equal(stub.calls.filter((call) => call.name === "storage.save").length, before);
+    drain();
+    const saves = stub.calls.filter((call) => call.name === "storage.save");
+    assert.equal(saves.length, before + 1);
+    assert.equal(saves.at(-1).args[0], '{"counter":"49"}');
+    // A clean frame issues no save at all.
+    drain();
+    assert.equal(stub.calls.filter((call) => call.name === "storage.save").length, before + 1);
+    // The host's pre-exit flush persists pending writes without a frame.
+    window.localStorage.setItem("last", "x");
+    globalThis.__kapNative_flushStorage();
+    assert.equal(stub.calls.filter((call) => call.name === "storage.save").length, before + 2);
+    window.localStorage.removeItem("counter");
+    window.localStorage.removeItem("last");
+    drain();
 });
 
 test("fonts register bytes and check families", async () => {

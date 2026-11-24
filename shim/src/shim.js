@@ -719,6 +719,7 @@
             else this.__parent = null;
             if (quits) {
                 mainCanvas = null;
+                flushStorage();
                 native.env.quit();
             }
         }
@@ -4438,6 +4439,7 @@
             }
         }
         audioTick();
+        flushStorage();
         inFrame = false;
     };
 
@@ -5104,7 +5106,18 @@
         }
     })();
 
+    // Writes are coalesced: a game that sets items every frame (settings
+    // sliders, incremental progress) must not serialize and fsync the whole
+    // store per call. Dirty state flushes once per frame and on quit.
+    let storageDirty = false;
+
     function persistStorage() {
+        storageDirty = true;
+    }
+
+    function flushStorage() {
+        if (!storageDirty) return;
+        storageDirty = false;
         try {
             native.storage.save(JSON.stringify(storageData));
         } catch (error) {
@@ -5148,6 +5161,10 @@
             return true;
         },
     });
+
+    // The host calls this once before exiting so debounced writes survive
+    // window close and --frames limits, which stop without another frame.
+    global.__kapNative_flushStorage = flushStorage;
 
     const gamepadObjects = new Map();
     let gamepadRevision = -1;
@@ -6008,7 +6025,10 @@
     define("TextEncoder", TextEncoder);
     define("TextDecoder", TextDecoder);
     global.fetch = fetchResource;
-    global.close = () => native.env.quit();
+    global.close = () => {
+        flushStorage();
+        native.env.quit();
+    };
     global.atob = atob;
     global.btoa = btoa;
     global.requestAnimationFrame = requestAnimationFrame;
