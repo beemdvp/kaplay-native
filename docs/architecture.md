@@ -2,7 +2,7 @@
 
 ## Shape of the runtime
 
-KAPLAY Native is a drop-in host, not a fork. The repository contains seven
+KAPLAY Native is a drop-in host, not a fork. The repository contains eight
 crates and one JavaScript shim:
 
 | Component | Role |
@@ -13,6 +13,7 @@ crates and one JavaScript shim:
 | `crates/pak` | asset sources: directories and `.pak` (zip) archives |
 | `crates/net` | HTTP and WebSocket transports on background threads |
 | `crates/audio` | software mixer, audio decoding, and platform output |
+| `crates/video` | MP4 demuxing and H.264 decoding on a per-video worker thread |
 | `crates/steam` | dynamic Steamworks flat API loading |
 | `shim/src/shim.js` | browser semantics: DOM, events, canvas, WebGL wrapper, fetch, storage |
 
@@ -54,12 +55,15 @@ and the remaining jobs still run.
 
 `__kapNative` is the only native surface. Each namespace is a function object:
 
-- `env` - version, platform, game name, `now()`, `log()`, `quit()`
+- `env` - version, platform, game name, `now()`, `log()`, `quit()`,
+  `randomBytes(out)` (system CSPRNG for Web Crypto)
 - `window` - size, title, fullscreen, cursor
 - `fs` - asset reads (`size`, `exists`, `read(path, out)`) and downloads
   (`download(name, bytes) -> saved path`)
-- `storage` - `localStorage` persistence (`load`, `save`)
-- `image` - decode from bytes or data URLs, dimensions
+- `storage` - `localStorage` persistence (`load`, `save`); the shim coalesces
+  writes to one save per frame and flushes before exit
+- `image` - decode from bytes or data URLs (synchronous and background-worker
+  paths), dimensions
 - `font` - register font bytes, query families
 - `canvas` - Canvas 2D operations against a native surface id
 - `gl` - WebGL 1 operations against a GL state handle table
@@ -68,6 +72,8 @@ and the remaining jobs still run.
 - `video` - MP4 decoding and frame uploads
 - `gamepad` - standard-mapped snapshots (`list() -> JSON`)
 - `steam` - Steamworks user, achievements, stats, cloud
+- `auth` - loopback OAuth relay (`open(providerUrl)`) for popup sign-in flows
+- `updates` - content update status and restart (`snapshot`, `apply`)
 
 Handles are `u32`; `-1` or a missing key means `null` on the JS side. Uploads
 pass caller-owned typed arrays so the shim never copies pixels: the host reads
@@ -84,34 +90,46 @@ only those. The engine-specific notes follow:
   `JS_FreeRuntime` assertion because the closure then owns a reference to its
   own realm). Closures accept at most seven parameters because `rquickjs` only
   implements `FromParams` for tuples up to arity seven. That constraint is why
-  `texImage2D` drops the `level` argument (always zero) and infers
-  `texSubImage2D` heights from the byte length.
+  `texImage2D` drops the `level` argument (always zero); `texSubImage2D` takes
+  an explicit height and receives its trailing `type`/`pixels` arguments
+  through `Rest<TailPixel>`.
 - V8 (`js/v8_engine.rs`) owns one `OwnedIsolate` on the main thread. A pointer
   to `HostState` is attached as `Function` data, and every callback recovers it
   from the callback info, so no closure captures Rust state at all. Evaluations
   run inside a context scope with the explicit microtasks policy, and the
-  isolate is initialized once per process behind a `Once`.
+  isolate is initialized once per process behind a `Once`. Microtask drains
+  are bounded by a four-second deadline guard so a self-requeueing microtask
+  cannot hang the frame, and the platform message loop is pumped after every
+  drain: `FinalizationRegistry` cleanup is a foreground task, not a microtask,
+  so without the pump released JS objects would never free their native
+  handles.
 
 ## The frame loop
 
 1. The host pumps winit events and forwards them to `__kapNative_dispatch`.
 2. It drains network events and calls the `__kapNative_onFetch*` /
    `__kapNative_onSocket*` shim callbacks, then drains the job queue again.
-3. Once per frame it calls `__kapNative_onFrame(now)`, which runs timers and
-   animation frame callbacks in the shim.
-4. The game calls into WebGL and Canvas 2D, which mutate the native state.
-5. KAPLAY renders into its own framebuffer and finally blits it to the
+3. It delivers finished background image decodes through
+   `__kapNative_onImageDecoded` and audio events through the audio callbacks.
+4. Once per frame it calls `__kapNative_onFrame(now)`, which runs timers and
+   animation frame callbacks in the shim, then flushes any debounced
+   `localStorage` writes.
+5. The game calls into WebGL and Canvas 2D, which mutate the native state.
+6. KAPLAY renders into its own framebuffer and finally blits it to the
    "default" framebuffer.
-6. The host presents that framebuffer to the window, aspect-fit with black
+7. The host presents that framebuffer to the window, aspect-fit with black
    bars, and swaps buffers while the window framebuffer is still bound, which
    macOS's `flushBuffer` requires.
 
 Neither engine pumps jobs automatically in the host's frame loop model, so
 after every evaluation and frame the host drains pending work: QuickJS runs
-`JS_ExecutePendingJob` until the queue is empty, and V8 runs
-`perform_microtask_checkpoint()` with the explicit microtasks policy. Without
-this, promise continuations never run and asset loading stalls at its first
-`await`.
+`JS_ExecutePendingJob` until the queue is empty (capped at one million jobs),
+and V8 runs `perform_microtask_checkpoint()` with the explicit microtasks
+policy under a four-second deadline guard, then pumps platform foreground
+tasks. Without this, promise continuations never run and asset loading stalls
+at its first `await`. Before exiting (window close, frame limit, update
+restart) the host calls `__kapNative_flushStorage` so debounced writes are
+persisted.
 
 ## Network
 
@@ -119,10 +137,13 @@ The `kaplay-native-net` crate owns every socket. The host thread never blocks on
 I/O:
 
 - a small pool of worker threads performs HTTP requests with `ureq`, sharing
-  one agent so connections and TLS sessions are reused;
-- each WebSocket gets its own thread with a 20 ms read timeout, so outgoing
-  frames are written promptly while incoming frames are polled and forwarded;
-- workers report `NetworkEvent`s through a channel that the frame loop drains.
+  one agent so connections and TLS sessions are reused; the agent has connect
+  and global timeouts so a hung server cannot occupy a worker forever;
+- each WebSocket gets its own thread driven by a nonblocking socket and a
+  `polling` poller, so outgoing frames are written promptly while incoming
+  frames are waited on and forwarded;
+- workers report `NetworkEvent`s through a bounded channel that the frame loop
+  drains.
 
 Response bodies stay in Rust until the shim asks for them. The host calls a
 callback with the body length, the shim allocates a `Uint8Array`, and a bridge

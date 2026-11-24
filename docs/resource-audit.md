@@ -124,4 +124,8 @@ The shim test script was also corrected to point at `test/shim.test.js`, since
   release host and compares native resource counts after a forced GC.
 - It covers image bitmaps, canvases and their contexts, uniform locations, and
   decoded audio buffers.
-- The Linux `Resource leaks` CI job runs it under Xvfb with software OpenGL.
+- The Linux `Resource leaks` CI job runs it under Xvfb with software OpenGL
+  for **both engines** (a QuickJS leg and a V8 leg). V8 requires pumping the
+  platform foreground task loop for `FinalizationRegistry` cleanup to run;
+  the host does this after every microtask drain, and `collect_garbage` calls
+  the exposed `gc()` directly so finalizers are delivered deterministically.
