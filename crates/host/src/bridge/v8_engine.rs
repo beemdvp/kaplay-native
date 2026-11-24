@@ -400,10 +400,32 @@ fn install_image(scope: &PinScope<'_, '_>, native: Local<v8::Object>, data: Loca
     let object = v8::Object::new(scope);
     register(scope, object, "load", image_load, data);
     register(scope, object, "decode", image_decode, data);
+    register(scope, object, "decodeAsync", image_decode_async, data);
+    register(scope, object, "loadAsync", image_load_async, data);
     register(scope, object, "width", image_width, data);
     register(scope, object, "height", image_height, data);
     register(scope, object, "free", image_free, data);
     set_property(scope, native, "image", object.into());
+}
+
+fn image_decode_async<'s, 'i>(_scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
+    let state = host(&args);
+    let request = with_u8(args.get(0), |bytes| {
+        state.decode_image_async(Arc::from(bytes))
+    })
+    .unwrap_or(0);
+    rv.set_uint32(request);
+}
+
+fn image_load_async<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
+    let state = host(&args);
+    let url = string_arg(scope, &args, 0);
+    let request = state
+        .assets
+        .read_uncached(&url)
+        .map(|bytes| state.decode_image_async(bytes))
+        .unwrap_or(0);
+    rv.set_uint32(request);
 }
 
 fn image_load<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {

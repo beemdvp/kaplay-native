@@ -17,6 +17,9 @@ function advance(ms) {
 }
 
 function drain() {
+    // The host pumps finished image decodes before the frame callback; the
+    // stub mirrors that so async loads complete inside one drain.
+    stub.image.finishDecodes();
     globalThis.__kapNative_onFrame(stub.state.time);
 }
 
@@ -1582,14 +1585,13 @@ test("images load from http urls when network access is enabled", async () => {
         image.onerror = reject;
     });
     image.src = "http://127.0.0.1:2567/remote.png";
-    await new Promise((resolve) => {
-        const check = () => {
-            if (image.complete) resolve();
-            else queueMicrotask(check);
-        };
-        check();
-    });
-    advance(0);
+    // The fetch response resolves through promise microtasks, then the decode
+    // finishes on a background worker and onload fires on a shim timer. Yield
+    // to real microtasks, deliver finished decodes, and tick a frame.
+    await new Promise((resolve) => setImmediate(resolve));
+    stub.image.finishDecodes();
+    advance(1);
+    assert.ok(image.complete);
     assert.deepEqual(await loaded, [5, 1, 5, 1]);
 });
 
@@ -1707,14 +1709,35 @@ test("changing an image source releases the previous bitmap", () => {
     stub.files.set("image/second.png", new Uint8Array([4, 5, 6]));
     const image = new Image();
     image.src = "image/first.png";
+    drain();
     const first = image.__id;
     assert.ok(first >= 0);
     image.src = "image/second.png";
+    drain();
     const freed = stub.calls
         .filter((entry) => entry.name === "image.free")
         .map((entry) => entry.args[0]);
     assert.ok(freed.includes(first));
     assert.notEqual(image.__id, first);
+    image.__release();
+});
+
+test("stale async image decodes free their orphaned bitmaps", () => {
+    stub.files.set("image/slow.png", new Uint8Array([9]));
+    stub.files.set("image/fast.png", new Uint8Array([8]));
+    const image = new Image();
+    image.src = "image/slow.png";
+    // Switch sources before the first decode finishes.
+    image.src = "image/fast.png";
+    drain();
+    const live = image.__id;
+    assert.ok(live >= 0);
+    const freed = stub.calls
+        .filter((entry) => entry.name === "image.free")
+        .map((entry) => entry.args[0]);
+    // The slow decode's bitmap must have been released, not adopted.
+    assert.ok(freed.some((id) => id !== live));
+    assert.equal(image.width, 4);
     image.__release();
 });
 

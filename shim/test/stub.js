@@ -23,6 +23,7 @@ export function installStub() {
     const audioBuffers = new Map();
     const audioVoices = new Map();
     const openSockets = [];
+    const pendingImageJobs = [];
     const state = {
         time: 0,
         storage: new Map(),
@@ -104,6 +105,25 @@ export function installStub() {
                 const id = nextId();
                 images.set(id, { width: bytes.length, height: 1 });
                 return id;
+            },
+            loadAsync: (url) => {
+                if (!files.has(url)) return 0;
+                const request = nextId();
+                pendingImageJobs.push(() => {
+                    const id = nextId();
+                    images.set(id, { width: 4, height: 3 });
+                    globalThis.__kapNative_onImageDecoded(request, id, true);
+                });
+                return request;
+            },
+            decodeAsync: (bytes) => {
+                const request = nextId();
+                pendingImageJobs.push(() => {
+                    const id = nextId();
+                    images.set(id, { width: bytes.length, height: 1 });
+                    globalThis.__kapNative_onImageDecoded(request, id, true);
+                });
+                return request;
             },
             width: (id) => images.get(id)?.width ?? -1,
             height: (id) => images.get(id)?.height ?? -1,
@@ -556,5 +576,12 @@ export function installStub() {
         },
     };
 
-    return { calls, logs, state, files, canvases, videos, net, audio };
+    const image = {
+        // Deliver queued background decodes, mirroring the host frame pump.
+        finishDecodes() {
+            while (pendingImageJobs.length) pendingImageJobs.shift()();
+        },
+    };
+
+    return { calls, logs, state, files, canvases, videos, net, audio, image };
 }

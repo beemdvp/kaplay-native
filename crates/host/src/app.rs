@@ -183,6 +183,21 @@ impl Inner {
         self.unmark();
     }
 
+    fn pump_images(&self) {
+        for result in self.state.image_decoder.take_results() {
+            let (id, ok) = match result.image {
+                Some(image) => (self.state.adopt_decoded_image(image), true),
+                None => (0, false),
+            };
+            if let Err(error) = self.js.call_global(
+                "__kapNative_onImageDecoded",
+                &[JsArg::Uint(result.request), JsArg::Uint(id), JsArg::Bool(ok)],
+            ) {
+                log::error!("image decode callback {}: {error}", result.request);
+            }
+        }
+    }
+
     fn pump_audio(&self) {
         let Some(audio) = self.state.audio.as_ref() else {
             return;
@@ -406,6 +421,7 @@ impl Inner {
         self.pump_auth();
         let network_ms = network_start.elapsed().as_secs_f32() * 1000.0;
         let audio_start = std::time::Instant::now();
+        self.pump_images();
         self.pump_audio();
         let audio_ms = audio_start.elapsed().as_secs_f32() * 1000.0;
         let now = self.state.now_ms();
@@ -737,6 +753,8 @@ impl HostApp {
             gamepads: std::cell::RefCell::new(crate::gamepad::Gamepads::new()),
             screenshot: std::cell::RefCell::new(None),
             canvas_png: std::cell::RefCell::new(None),
+            image_decoder: crate::state::ImageDecoder::new(),
+            next_image_request: Cell::new(1),
         });
 
         if self.config.fullscreen {

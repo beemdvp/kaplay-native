@@ -325,6 +325,31 @@ fn install_image<'js>(
     {
         let state = state.clone();
         object.set(
+            "decodeAsync",
+            Function::new(ctx.clone(), move |data: TypedArray<u8>| -> u32 {
+                let Some(bytes) = slice_u8(&data) else {
+                    return 0;
+                };
+                state.decode_image_async(Arc::from(bytes))
+            })?,
+        )?;
+    }
+    {
+        let state = state.clone();
+        object.set(
+            "loadAsync",
+            Function::new(ctx.clone(), move |url: String| -> u32 {
+                state
+                    .assets
+                    .read_uncached(&url)
+                    .map(|bytes| state.decode_image_async(bytes))
+                    .unwrap_or(0)
+            })?,
+        )?;
+    }
+    {
+        let state = state.clone();
+        object.set(
             "width",
             Function::new(ctx.clone(), move |id: u32| -> i32 {
                 state

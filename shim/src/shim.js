@@ -1548,6 +1548,23 @@
                 }, 0);
             };
             const apply = (bytes) => {
+                // Decode off the frame thread when the host supports it; a
+                // large PNG must not hitch the frame. The synchronous path
+                // remains for hosts without the async bridge.
+                if (native.image && typeof native.image.decodeAsync === "function") {
+                    let request = 0;
+                    try {
+                        request = native.image.decodeAsync(bytes);
+                    } catch (error) {
+                        reportError(error);
+                    }
+                    if (request > 0) {
+                        pendingImageDecodes.set(request, { accept, fail, request: this.__load });
+                        return;
+                    }
+                    fail();
+                    return;
+                }
                 let id = -1;
                 try {
                     id = native.image.decode(bytes);
@@ -1571,14 +1588,29 @@
                 else fail();
                 return;
             }
-            try {
-                const id = native.image.load(url);
-                if (id >= 0) {
-                    accept(id);
+            if (native.image && typeof native.image.loadAsync === "function") {
+                let request = 0;
+                try {
+                    request = native.image.loadAsync(url);
+                } catch (error) {
+                    reportError(error);
+                }
+                if (request > 0) {
+                    pendingImageDecodes.set(request, { accept, fail, request: this.__load });
                     return;
                 }
-            } catch (error) {
-                reportError(error);
+                // A zero request means the asset was not found; fall through
+                // to the network path exactly like the synchronous loader.
+            } else {
+                try {
+                    const id = native.image.load(url);
+                    if (id >= 0) {
+                        accept(id);
+                        return;
+                    }
+                } catch (error) {
+                    reportError(error);
+                }
             }
             if (!native.env.networkAllowed) {
                 fail();
@@ -1590,6 +1622,23 @@
                 .catch(fail);
         }
     }
+
+    const pendingImageDecodes = new Map();
+
+    global.__kapNative_onImageDecoded = function (request, id, ok) {
+        const pending = pendingImageDecodes.get(request);
+        if (!pending) {
+            // The Image moved on to another src while decoding; release the
+            // orphaned bitmap instead of leaking it.
+            if (ok && id > 0 && native.image && typeof native.image.free === "function") {
+                native.image.free(id);
+            }
+            return;
+        }
+        pendingImageDecodes.delete(request);
+        if (ok && id > 0) pending.accept(id);
+        else pending.fail();
+    };
 
     // Exposed for `instanceof` feature checks only; `createImageBitmap` is not
     // implemented, so this class is never produced by the runtime.
