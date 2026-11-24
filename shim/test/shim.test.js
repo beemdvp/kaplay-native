@@ -532,6 +532,8 @@ test("crypto fills typed arrays and mints uuids", () => {
     const bytes = new Uint8Array(16);
     assert.equal(crypto.getRandomValues(bytes), bytes);
     assert.ok(bytes.some((value) => value !== 0));
+    // Randomness must come from the host CSPRNG, not Math.random.
+    assert.ok(stub.calls.some((entry) => entry.name === "env.randomBytes"));
 
     const uuid = crypto.randomUUID();
     assert.match(uuid, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
@@ -540,6 +542,10 @@ test("crypto fills typed arrays and mints uuids", () => {
     const words = new Uint32Array(2);
     crypto.getRandomValues(words);
     assert.equal(words.length, 2);
+
+    // Web Crypto rejects float arrays and requests over the 64 KiB quota.
+    assert.throws(() => crypto.getRandomValues(new Float32Array(4)), TypeError);
+    assert.throws(() => crypto.getRandomValues(new Uint8Array(65537)));
 });
 
 test("dom elements support lookup, nesting, and input classes", () => {

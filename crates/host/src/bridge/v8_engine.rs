@@ -231,11 +231,21 @@ fn install_env(
     register(scope, object, "now", env_now, data);
     register(scope, object, "log", env_log, data);
     register(scope, object, "quit", env_quit, data);
+    register(scope, object, "randomBytes", env_random_bytes, data);
     set_property(scope, native, "env", object.into());
 }
 
 fn env_now<'s, 'i>(_scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
     rv.set_double(host(&args).now_ms());
+}
+
+fn env_random_bytes<'s, 'i>(_scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv: Rv<'s>) {
+    use ring::rand::SecureRandom;
+    let rng = ring::rand::SystemRandom::new();
+    with_u8_mut(args.get(0), |out| {
+        // The shim caps requests at the Web Crypto quota (64 KiB).
+        let _ = rng.fill(out);
+    });
 }
 
 fn env_log<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv: Rv<'s>) {

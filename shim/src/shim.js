@@ -1652,14 +1652,36 @@
 
     function randomBytes(length) {
         const bytes = new Uint8Array(length);
-        for (let i = 0; i < length; i++) bytes[i] = Math.floor(Math.random() * 256);
+        fillRandom(bytes);
         return bytes;
+    }
+
+    // Security-sensitive randomness (PKCE verifiers, nonces, UUIDs) comes from
+    // the host CSPRNG. Math.random stays available for gameplay but must not
+    // back crypto.getRandomValues.
+    function fillRandom(bytes) {
+        if (native.env && typeof native.env.randomBytes === "function") {
+            native.env.randomBytes(bytes);
+            return;
+        }
+        for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
     }
 
     const crypto = {
         getRandomValues(view) {
-            const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
-            for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+            if (!(view instanceof Uint8Array)
+                && !(view instanceof Int8Array)
+                && !(view instanceof Uint16Array)
+                && !(view instanceof Int16Array)
+                && !(view instanceof Uint32Array)
+                && !(view instanceof Int32Array)
+                && !(view instanceof Uint8ClampedArray)) {
+                throw new TypeError("getRandomValues requires an integer typed array");
+            }
+            if (view.byteLength > 65536) {
+                throw new Error("getRandomValues: quota exceeded (65536 bytes)");
+            }
+            fillRandom(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
             return view;
         },
         randomUUID() {

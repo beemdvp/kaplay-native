@@ -50,6 +50,13 @@ export function installStub() {
             now: () => state.time,
             log: (level, message) => logs.push({ level, message }),
             quit: () => record("env.quit", []),
+            randomBytes: (out) => {
+                record("env.randomBytes", [out.length]);
+                state.randomCounter = (state.randomCounter || 0) + 1;
+                for (let i = 0; i < out.length; i++) {
+                    out[i] = (i * 37 + state.randomCounter * 101 + 11) & 0xff;
+                }
+            },
         },
         window: {
             size: () => [960, 540],

@@ -108,6 +108,17 @@ fn install_env<'js>(
             })?,
         )?;
     }
+    object.set(
+        "randomBytes",
+        Function::new(ctx.clone(), move |mut out: TypedArray<u8>| {
+            use ring::rand::SecureRandom;
+            let rng = ring::rand::SystemRandom::new();
+            if let Some(out) = slice_u8_mut(&mut out) {
+                // The shim caps requests at the Web Crypto quota (64 KiB).
+                let _ = rng.fill(out);
+            }
+        })?,
+    )?;
     native.set("env", object)?;
     Ok(())
 }

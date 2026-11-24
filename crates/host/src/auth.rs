@@ -216,21 +216,14 @@ fn relay_page(provider_url: &str, token: &str) -> String {
 }
 
 fn random_token() -> String {
-    use std::collections::hash_map::RandomState;
-    use std::hash::{BuildHasher, Hasher};
-
-    let mut hasher = RandomState::new().build_hasher();
-    hasher.write_u128(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or(0),
-    );
-    hasher.write_u32(std::process::id());
-    let first = hasher.finish();
-    let mut second_hasher = RandomState::new().build_hasher();
-    second_hasher.write_u64(first);
-    format!("{first:016x}{:016x}", second_hasher.finish())
+    // The token guards the loopback callback endpoint, so it must come from
+    // the system CSPRNG, not a time-seeded hasher.
+    use ring::rand::SecureRandom;
+    let rng = ring::rand::SystemRandom::new();
+    let mut bytes = [0u8; 16];
+    rng.fill(&mut bytes)
+        .expect("system randomness is available");
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 const CALLBACK_PAGE: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Signed in</title></head><body style=\"margin:0;min-height:100vh;display:grid;place-items:center;background:#111;color:#eee;font:16px system-ui,sans-serif\"><main>Signed in. You can close this tab and return to the game.</main></body></html>";
@@ -282,9 +275,13 @@ button.addEventListener("click", () => {
   button.hidden = true;
   status.textContent = "Complete sign-in in the popup window\u2026";
 });
+const providerOrigin = new URL(provider, location.href).origin;
 window.addEventListener("message", (event) => {
   if (settled) { return; }
   if (popup && event.source !== popup) { return; }
+  // Only the provider's own origin may deliver credentials; a page the
+  // popup navigates to must not be able to complete sign-in.
+  if (event.origin !== providerOrigin) { return; }
   const data = event.data;
   if (data === null || typeof data !== "object") { return; }
   if (data.user === undefined && data.token === undefined && data.error === undefined) { return; }
@@ -361,6 +358,17 @@ mod tests {
         assert!(response.contains("Continue with "));
         assert!(response.contains("window.open(provider"));
         assert!(response.contains("if (!settled && popup && popup.closed)"));
+        // The relay must reject postMessage from any origin but the provider's.
+        assert!(response.contains("event.origin !== providerOrigin"));
+    }
+
+    #[test]
+    fn tokens_are_hex_from_the_system_csprng() {
+        let first = random_token();
+        let second = random_token();
+        assert_eq!(first.len(), 32);
+        assert!(first.chars().all(|ch| ch.is_ascii_hexdigit()));
+        assert_ne!(first, second);
     }
 
     #[test]
