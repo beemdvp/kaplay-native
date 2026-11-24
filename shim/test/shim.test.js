@@ -285,6 +285,32 @@ test("webgl texture uploads dispatch on the source type", () => {
     assert.deepEqual(call.args, [3553, 1, 2, 6408, 5121, canvas.__id]);
 });
 
+test("texSubImage2D accepts the width/height overload with raw pixels", () => {
+    const canvas = makeCanvas();
+    const gl = canvas.getContext("webgl");
+
+    gl.texSubImage2D(
+        gl.TEXTURE_2D, 0, 2, 3, 4, 2, gl.RGBA, gl.UNSIGNED_BYTE,
+        new Uint8Array(4 * 2 * 4).fill(7),
+    );
+    const call = stub.calls.filter((entry) => entry.name === "gl.texSubImage2D").at(-1);
+    assert.deepEqual(call.args.slice(0, 7), [3553, 2, 3, 4, 2, 6408, 5121]);
+    assert.equal(call.args[7].length, 32);
+
+    // ImageData carries its own dimensions through the source overload.
+    const data = new ImageData(3, 5);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+    const imageCall = stub.calls.filter((entry) => entry.name === "gl.texSubImage2D").at(-1);
+    assert.deepEqual(imageCall.args.slice(0, 7), [3553, 0, 0, 3, 5, 6408, 5121]);
+    assert.equal(imageCall.args[7].length, 3 * 5 * 4);
+
+    // A raw array without dimensions is rejected instead of silently ignored.
+    assert.throws(
+        () => gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(16)),
+        TypeError,
+    );
+});
+
 test("webgl buffers and uniforms normalize their arguments", () => {
     const canvas = makeCanvas();
     const gl = canvas.getContext("webgl");

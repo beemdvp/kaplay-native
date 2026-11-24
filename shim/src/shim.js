@@ -1112,7 +1112,31 @@
             }
         }
 
-        texSubImage2D(target, level, xoffset, yoffset, format, type, source) {
+        texSubImage2D(target, level, xoffset, yoffset, ...rest) {
+            // Two overloads:
+            //   (target, level, x, y, format, type, source)
+            //   (target, level, x, y, width, height, format, type, pixels)
+            if (rest.length >= 5) {
+                const width = rest[0];
+                const height = rest[1];
+                const format = rest[2];
+                const type = rest[3];
+                const pixels = rest[4];
+                native.gl.texSubImage2D(
+                    target,
+                    xoffset,
+                    yoffset,
+                    width,
+                    height,
+                    format,
+                    type,
+                    pixels == null ? new Uint8Array(0) : bytesView(pixels),
+                );
+                return;
+            }
+            const format = rest[0];
+            const type = rest[1];
+            const source = rest[2];
             if (source instanceof HTMLCanvasElement) {
                 native.gl.texSubImage2DCanvas(
                     target,
@@ -1137,9 +1161,26 @@
                     xoffset,
                     yoffset,
                     source.width,
+                    source.height,
                     format,
                     type,
                     bytesView(source.data),
+                );
+            } else if (source instanceof HTMLVideoElement) {
+                native.gl.texImage2DVideo(
+                    target,
+                    format,
+                    format,
+                    type,
+                    source.__nativeId,
+                    source.currentTime,
+                );
+            } else if (ArrayBuffer.isView(source) || source instanceof ArrayBuffer) {
+                // No dimensions in this overload; the caller must use the
+                // width/height form for raw arrays. Keep browser behavior of
+                // rejecting rather than silently guessing.
+                throw new TypeError(
+                    "texSubImage2D with a buffer source requires the width/height overload",
                 );
             }
         }

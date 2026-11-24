@@ -1770,20 +1770,39 @@ fn gl_tex_image_2d<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv: Rv
     let height = gl_arg_i32(scope, &args, 3);
     let format = gl_arg_u32(scope, &args, 4);
     let ty = gl_arg_u32(scope, &args, 5);
-    let owned = with_u8(args.get(6), <[u8]>::to_vec);
     let options = state.gl.borrow().upload_options();
-    state.gl.borrow_mut().tex_image_2d(
-        target,
-        0,
-        internal_format,
-        width,
-        height,
-        0,
-        format,
-        ty,
-        owned.as_deref(),
-        options,
-    );
+    let pixels = args.get(6);
+    if pixels.is_null_or_undefined() {
+        state.gl.borrow_mut().tex_image_2d(
+            target,
+            0,
+            internal_format,
+            width,
+            height,
+            0,
+            format,
+            ty,
+            None,
+            options,
+        );
+        return;
+    }
+    // Borrow the caller's backing store directly; `with_u8` pins it for the
+    // duration of the upload so no pixel copy is needed.
+    with_u8(pixels, |bytes| {
+        state.gl.borrow_mut().tex_image_2d(
+            target,
+            0,
+            internal_format,
+            width,
+            height,
+            0,
+            format,
+            ty,
+            Some(bytes),
+            options,
+        );
+    });
 }
 
 fn gl_tex_sub_image_2d<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv: Rv<'s>) {
@@ -1792,21 +1811,18 @@ fn gl_tex_sub_image_2d<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv
     let x = gl_arg_i32(scope, &args, 1);
     let y = gl_arg_i32(scope, &args, 2);
     let width = gl_arg_i32(scope, &args, 3);
-    let format = gl_arg_u32(scope, &args, 4);
-    let ty = gl_arg_u32(scope, &args, 5);
-    let Some(bytes) = with_u8(args.get(6), <[u8]>::to_vec) else {
-        return;
-    };
-    let height = if width > 0 {
-        (bytes.len() as i32 / (width * 4)).max(1)
-    } else {
-        0
-    };
+    let height = gl_arg_i32(scope, &args, 4);
+    let format = gl_arg_u32(scope, &args, 5);
+    let ty = gl_arg_u32(scope, &args, 6);
     let options = state.gl.borrow().upload_options();
-    state
-        .gl
-        .borrow_mut()
-        .tex_sub_image_2d(target, 0, x, y, width, height, format, ty, &bytes, options);
+    // Borrow the caller's backing store directly; `with_u8` pins it for the
+    // duration of the upload so no pixel copy is needed.
+    with_u8(args.get(7), |bytes| {
+        state
+            .gl
+            .borrow_mut()
+            .tex_sub_image_2d(target, 0, x, y, width, height, format, ty, bytes, options);
+    });
 }
 
 fn gl_tex_image_2d_image<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv: Rv<'s>) {

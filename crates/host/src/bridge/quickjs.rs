@@ -4,10 +4,27 @@ use std::sync::Arc;
 use kaplay_native_canvas2d::ImageSource;
 use kaplay_native_gfx::pixels::UploadOptions;
 use rquickjs::function::Rest;
-use rquickjs::{Ctx, Function, Object, TypedArray};
+use rquickjs::{Ctx, FromJs, Function, Object, TypedArray};
 
 use super::{handle, option_handle, parse_headers, source_size};
 use crate::state::{HostState, VideoInfo};
+
+/// One trailing argument of `texSubImage2D`: either the numeric `type` or the
+/// pixel typed array. rquickjs caps positional parameters at seven, so the
+/// eighth and ninth arguments arrive through `Rest<TailPixel>` instead.
+enum TailPixel<'js> {
+    Type(u32),
+    Pixels(TypedArray<'js, u8>),
+}
+
+impl<'js> FromJs<'js> for TailPixel<'js> {
+    fn from_js(ctx: &Ctx<'js>, value: rquickjs::Value<'js>) -> rquickjs::Result<Self> {
+        if let Ok(pixels) = TypedArray::<u8>::from_value(value.clone()) {
+            return Ok(Self::Pixels(pixels));
+        }
+        Ok(Self::Type(u32::from_js(ctx, value)?))
+    }
+}
 
 fn slice_u8<'a, 'js>(array: &'a TypedArray<'js, u8>) -> Option<&'a [u8]> {
     let raw = array.as_raw()?;
@@ -1616,16 +1633,21 @@ fn install_gl<'js>(
                   x: i32,
                   y: i32,
                   width: i32,
+                  height: i32,
                   format: u32,
-                  ty: u32,
-                  pixels: TypedArray<u8>| {
-                let Some(bytes) = slice_u8(&pixels) else {
+                  tail: Rest<TailPixel>| {
+                // The remaining parameters are `type` and `pixels`; rquickjs
+                // only implements FromParams up to arity seven, so the tail
+                // arrives as Rest of a small converter instead of two more
+                // positional arguments.
+                let mut tail = tail.0.into_iter();
+                let (Some(TailPixel::Type(ty)), Some(TailPixel::Pixels(pixels))) =
+                    (tail.next(), tail.next())
+                else {
                     return;
                 };
-                let height = if width > 0 {
-                    (bytes.len() as i32 / (width * 4)).max(1)
-                } else {
-                    0
+                let Some(bytes) = slice_u8(&pixels) else {
+                    return;
                 };
                 let options = state.gl.borrow().upload_options();
                 state

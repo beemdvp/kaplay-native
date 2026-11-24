@@ -58,6 +58,20 @@ pub struct GlState {
     vertex_array: Option<glow::VertexArray>,
 }
 
+/// Byte count for a `readPixels` extent, or `None` when the dimensions are
+/// invalid. Computed in u64: game-supplied dimensions can overflow i32, and a
+/// wrapped-small count would pass the bounds check while GL reads the full
+/// extent into a short buffer.
+fn read_pixel_bytes(width: i32, height: i32) -> Option<usize> {
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+    (width as u64)
+        .checked_mul(height as u64)?
+        .checked_mul(4)
+        .and_then(|bytes| usize::try_from(bytes).ok())
+}
+
 #[derive(Clone, Copy, Default)]
 struct AttribPointer {
     enabled: bool,
@@ -411,7 +425,9 @@ impl GlState {
     }
 
     pub fn read_pixels(&mut self, x: i32, y: i32, width: i32, height: i32, out: &mut [u8]) {
-        let needed = (width * height * 4) as usize;
+        let Some(needed) = read_pixel_bytes(width, height) else {
+            return;
+        };
         if out.len() < needed {
             return;
         }
@@ -976,7 +992,23 @@ impl GlState {
 
 #[cfg(test)]
 mod tests {
-    use super::shader;
+    use super::{read_pixel_bytes, shader};
+
+    #[test]
+    fn read_pixel_bytes_rejects_overflowing_extents() {
+        assert_eq!(read_pixel_bytes(2, 3), Some(24));
+        assert_eq!(read_pixel_bytes(0, 3), None);
+        assert_eq!(read_pixel_bytes(-1, 3), None);
+        assert_eq!(read_pixel_bytes(2, -3), None);
+        // 30000 * 30000 * 4 overflows i32; it must not wrap to a small count.
+        assert_eq!(read_pixel_bytes(30_000, 30_000), Some(3_600_000_000));
+        // i32::MAX squared times four still fits u64 (just under 2^64) and is
+        // returned as the true, enormous count that no output buffer matches.
+        assert_eq!(
+            read_pixel_bytes(i32::MAX, i32::MAX),
+            Some(18_446_744_056_529_682_436)
+        );
+    }
 
     #[test]
     fn translates_single_line_shaders() {
