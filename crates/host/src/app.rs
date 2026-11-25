@@ -191,7 +191,11 @@ impl Inner {
             };
             if let Err(error) = self.js.call_global(
                 "__kapNative_onImageDecoded",
-                &[JsArg::Uint(result.request), JsArg::Uint(id), JsArg::Bool(ok)],
+                &[
+                    JsArg::Uint(result.request),
+                    JsArg::Uint(id),
+                    JsArg::Bool(ok),
+                ],
             ) {
                 log::error!("image decode callback {}: {error}", result.request);
             }
