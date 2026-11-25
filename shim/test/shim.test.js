@@ -17,6 +17,9 @@ function advance(ms) {
 }
 
 function drain() {
+    // The host pumps finished image decodes before the frame callback; the
+    // stub mirrors that so async loads complete inside one drain.
+    stub.image.finishDecodes();
     globalThis.__kapNative_onFrame(stub.state.time);
 }
 
@@ -219,11 +222,36 @@ test("image constructors support instanceof feature checks", () => {
 test("local storage persists through the native bridge", () => {
     window.localStorage["highscore"] = JSON.stringify(4200);
     assert.equal(window.localStorage["highscore"], "4200");
+    // Writes are debounced to the frame boundary, not issued per set.
+    assert.ok(!stub.calls.some((call) => call.name === "storage.save"
+        && call.args[0] === '{"highscore":"4200"}'));
+    drain();
     const saved = stub.calls.filter((call) => call.name === "storage.save").at(-1);
     assert.equal(saved.args[0], '{"highscore":"4200"}');
     assert.equal(window.localStorage.getItem("highscore"), "4200");
     window.localStorage.removeItem("highscore");
     assert.equal(window.localStorage.getItem("highscore"), null);
+    drain();
+});
+
+test("local storage coalesces many writes into one save per frame", () => {
+    const before = stub.calls.filter((call) => call.name === "storage.save").length;
+    for (let i = 0; i < 50; i++) window.localStorage.setItem("counter", String(i));
+    assert.equal(stub.calls.filter((call) => call.name === "storage.save").length, before);
+    drain();
+    const saves = stub.calls.filter((call) => call.name === "storage.save");
+    assert.equal(saves.length, before + 1);
+    assert.equal(saves.at(-1).args[0], '{"counter":"49"}');
+    // A clean frame issues no save at all.
+    drain();
+    assert.equal(stub.calls.filter((call) => call.name === "storage.save").length, before + 1);
+    // The host's pre-exit flush persists pending writes without a frame.
+    window.localStorage.setItem("last", "x");
+    globalThis.__kapNative_flushStorage();
+    assert.equal(stub.calls.filter((call) => call.name === "storage.save").length, before + 2);
+    window.localStorage.removeItem("counter");
+    window.localStorage.removeItem("last");
+    drain();
 });
 
 test("fonts register bytes and check families", async () => {
@@ -283,6 +311,32 @@ test("webgl texture uploads dispatch on the source type", () => {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 1, 2, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
     call = stub.calls.filter((entry) => entry.name === "gl.texSubImage2DCanvas").at(-1);
     assert.deepEqual(call.args, [3553, 1, 2, 6408, 5121, canvas.__id]);
+});
+
+test("texSubImage2D accepts the width/height overload with raw pixels", () => {
+    const canvas = makeCanvas();
+    const gl = canvas.getContext("webgl");
+
+    gl.texSubImage2D(
+        gl.TEXTURE_2D, 0, 2, 3, 4, 2, gl.RGBA, gl.UNSIGNED_BYTE,
+        new Uint8Array(4 * 2 * 4).fill(7),
+    );
+    const call = stub.calls.filter((entry) => entry.name === "gl.texSubImage2D").at(-1);
+    assert.deepEqual(call.args.slice(0, 7), [3553, 2, 3, 4, 2, 6408, 5121]);
+    assert.equal(call.args[7].length, 32);
+
+    // ImageData carries its own dimensions through the source overload.
+    const data = new ImageData(3, 5);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+    const imageCall = stub.calls.filter((entry) => entry.name === "gl.texSubImage2D").at(-1);
+    assert.deepEqual(imageCall.args.slice(0, 7), [3553, 0, 0, 3, 5, 6408, 5121]);
+    assert.equal(imageCall.args[7].length, 3 * 5 * 4);
+
+    // A raw array without dimensions is rejected instead of silently ignored.
+    assert.throws(
+        () => gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(16)),
+        TypeError,
+    );
 });
 
 test("webgl buffers and uniforms normalize their arguments", () => {
@@ -506,6 +560,8 @@ test("crypto fills typed arrays and mints uuids", () => {
     const bytes = new Uint8Array(16);
     assert.equal(crypto.getRandomValues(bytes), bytes);
     assert.ok(bytes.some((value) => value !== 0));
+    // Randomness must come from the host CSPRNG, not Math.random.
+    assert.ok(stub.calls.some((entry) => entry.name === "env.randomBytes"));
 
     const uuid = crypto.randomUUID();
     assert.match(uuid, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
@@ -514,6 +570,10 @@ test("crypto fills typed arrays and mints uuids", () => {
     const words = new Uint32Array(2);
     crypto.getRandomValues(words);
     assert.equal(words.length, 2);
+
+    // Web Crypto rejects float arrays and requests over the 64 KiB quota.
+    assert.throws(() => crypto.getRandomValues(new Float32Array(4)), TypeError);
+    assert.throws(() => crypto.getRandomValues(new Uint8Array(65537)));
 });
 
 test("dom elements support lookup, nesting, and input classes", () => {
@@ -1550,14 +1610,13 @@ test("images load from http urls when network access is enabled", async () => {
         image.onerror = reject;
     });
     image.src = "http://127.0.0.1:2567/remote.png";
-    await new Promise((resolve) => {
-        const check = () => {
-            if (image.complete) resolve();
-            else queueMicrotask(check);
-        };
-        check();
-    });
-    advance(0);
+    // The fetch response resolves through promise microtasks, then the decode
+    // finishes on a background worker and onload fires on a shim timer. Yield
+    // to real microtasks, deliver finished decodes, and tick a frame.
+    await new Promise((resolve) => setImmediate(resolve));
+    stub.image.finishDecodes();
+    advance(1);
+    assert.ok(image.complete);
     assert.deepEqual(await loaded, [5, 1, 5, 1]);
 });
 
@@ -1675,14 +1734,35 @@ test("changing an image source releases the previous bitmap", () => {
     stub.files.set("image/second.png", new Uint8Array([4, 5, 6]));
     const image = new Image();
     image.src = "image/first.png";
+    drain();
     const first = image.__id;
     assert.ok(first >= 0);
     image.src = "image/second.png";
+    drain();
     const freed = stub.calls
         .filter((entry) => entry.name === "image.free")
         .map((entry) => entry.args[0]);
     assert.ok(freed.includes(first));
     assert.notEqual(image.__id, first);
+    image.__release();
+});
+
+test("stale async image decodes free their orphaned bitmaps", () => {
+    stub.files.set("image/slow.png", new Uint8Array([9]));
+    stub.files.set("image/fast.png", new Uint8Array([8]));
+    const image = new Image();
+    image.src = "image/slow.png";
+    // Switch sources before the first decode finishes.
+    image.src = "image/fast.png";
+    drain();
+    const live = image.__id;
+    assert.ok(live >= 0);
+    const freed = stub.calls
+        .filter((entry) => entry.name === "image.free")
+        .map((entry) => entry.args[0]);
+    // The slow decode's bitmap must have been released, not adopted.
+    assert.ok(freed.some((id) => id !== live));
+    assert.equal(image.width, 4);
     image.__release();
 });
 

@@ -26,8 +26,11 @@ missing.
 - `Promise.withResolvers` is polyfilled on both engines.
 - `URL` and `URLSearchParams` are implemented, including base resolution and
   form encoding, because SDKs parse their endpoint URLs at import time.
-- `crypto.getRandomValues` and `crypto.randomUUID` are backed by `Math.random`,
-  which is fine for gameplay identifiers but not for secrets.
+- `crypto.getRandomValues` and `crypto.randomUUID` are backed by the system
+  CSPRNG through `native.env.randomBytes`, so SDK nonces and PKCE verifiers
+  are cryptographically random. Float arrays and requests over the 64 KiB
+  Web Crypto quota are rejected. `Math.random` remains available for
+  gameplay randomness.
 - `matchMedia` returns a non-matching media query list, so pointer-capability
   checks report a desktop.
 - `Intl` is not available on the default QuickJS build. KAPLAY falls back to a
@@ -128,6 +131,11 @@ so accidental use does not throw.
 The full surface KAPLAY uses: textures, buffers, shaders and programs,
 uniforms, vertex attributes, framebuffer and renderbuffer objects, state
 toggles, `readPixels`, and `getExtension("WEBGL_lose_context")`.
+`texImage2D` and `texSubImage2D` accept both source overloads (canvas, image,
+video, `ImageData`) and the raw typed-array overload; `texSubImage2D` with a
+buffer source requires the explicit width/height form. Texture uploads borrow
+the caller's typed array on both engines, so pixels are not copied at the
+bridge boundary.
 
 The context is desktop OpenGL. Shaders are translated from GLSL ES 1.00 for
 both compatibility profiles (`#version 120`) and core profiles (`#version 150
@@ -160,14 +168,17 @@ returns `NO_ERROR`, and `isContextLost` returns `false`.
   supported.
 - `Image` with data URLs, blob URLs, bundled files, and HTTP(S) URLs when
   `--allow-network` is set. PNG, JPEG, WebP, GIF (first frame), and BMP are
-  decoded, and `naturalWidth`/`naturalHeight` are populated.
+  decoded on a background worker pool (with size and allocation limits), and
+  `naturalWidth`/`naturalHeight` are populated when `onload` fires.
 - `FontFace` from an `ArrayBuffer`/typed array, a data URL, a bundled file, or
   an HTTP(S) URL when `--allow-network` is set.
 - `download`, `downloadText`, `downloadJSON`, and `downloadBlob` write to the
   platform downloads directory, falling back to the save directory. Existing
   files are not overwritten; a counter is appended to the suggested name.
 - `localStorage` is persisted as JSON in the platform data directory
-  (`--save-dir` overrides it) and written atomically.
+  (`--save-dir` overrides it) and written atomically. Writes are coalesced to
+  one save per frame and flushed before the host exits, so per-frame
+  `setItem` calls do not perform disk I/O inside the frame loop.
 - `AudioContext`, `AudioBuffer`, `AudioBufferSourceNode`, `GainNode`,
   `StereoPannerNode`, `OscillatorNode`, `BiquadFilterNode`, `DelayNode`,
   `WaveShaperNode`, `DynamicsCompressorNode`, `ConvolverNode`,

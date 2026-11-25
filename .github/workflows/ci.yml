@@ -223,8 +223,16 @@ jobs:
           path: target/release/kaplay-native-host.exe
 
   leak:
-    name: Resource leaks (ubuntu-latest)
+    name: Resource leaks (${{ matrix.engine }}, ubuntu-latest)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - engine: quickjs
+            features: ""
+          - engine: v8
+            features: "--no-default-features --features v8"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -237,7 +245,7 @@ jobs:
           sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
             libxi-dev libxcursor-dev libxrandr-dev libgl1-mesa-dev libxkbcommon-x11-0 libudev-dev \
             xvfb
-      - run: cargo build --release -p kaplay-native-host
+      - run: cargo build --release -p kaplay-native-host ${{ matrix.features }}
       - name: Check native resource counts
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"

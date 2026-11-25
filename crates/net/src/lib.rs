@@ -193,6 +193,10 @@ impl Network {
 fn new_agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .http_status_as_error(false)
+        // A hung server must not occupy a fetch worker forever; without a
+        // timeout four stalled requests freeze every later fetch.
+        .timeout_connect(Some(Duration::from_secs(10)))
+        .timeout_global(Some(Duration::from_secs(60)))
         .build()
         .new_agent()
 }

@@ -183,6 +183,25 @@ impl Inner {
         self.unmark();
     }
 
+    fn pump_images(&self) {
+        for result in self.state.image_decoder.take_results() {
+            let (id, ok) = match result.image {
+                Some(image) => (self.state.adopt_decoded_image(image), true),
+                None => (0, false),
+            };
+            if let Err(error) = self.js.call_global(
+                "__kapNative_onImageDecoded",
+                &[
+                    JsArg::Uint(result.request),
+                    JsArg::Uint(id),
+                    JsArg::Bool(ok),
+                ],
+            ) {
+                log::error!("image decode callback {}: {error}", result.request);
+            }
+        }
+    }
+
     fn pump_audio(&self) {
         let Some(audio) = self.state.audio.as_ref() else {
             return;
@@ -406,6 +425,7 @@ impl Inner {
         self.pump_auth();
         let network_ms = network_start.elapsed().as_secs_f32() * 1000.0;
         let audio_start = std::time::Instant::now();
+        self.pump_images();
         self.pump_audio();
         let audio_ms = audio_start.elapsed().as_secs_f32() * 1000.0;
         let now = self.state.now_ms();
@@ -737,6 +757,8 @@ impl HostApp {
             gamepads: std::cell::RefCell::new(crate::gamepad::Gamepads::new()),
             screenshot: std::cell::RefCell::new(None),
             canvas_png: std::cell::RefCell::new(None),
+            image_decoder: crate::state::ImageDecoder::new(),
+            next_image_request: Cell::new(1),
         });
 
         if self.config.fullscreen {
@@ -808,7 +830,10 @@ impl HostApp {
             }
         }
         for source in preload_sources {
-            if let Err(error) = js.eval_preload(&source) {
+            watchdog.mark("preload");
+            let result = js.eval_preload(&source);
+            watchdog.unmark();
+            if let Err(error) = result {
                 log::error!("preload error: {error}");
                 event_loop.exit();
                 return None;
@@ -821,7 +846,10 @@ impl HostApp {
             event_loop.exit();
             return None;
         };
-        if let Err(error) = js.eval_module(&name, &source) {
+        watchdog.mark("boot");
+        let result = js.eval_module(&name, &source);
+        watchdog.unmark();
+        if let Err(error) = result {
             log::error!("script error: {error}");
             event_loop.exit();
             return None;
@@ -998,6 +1026,11 @@ impl HostApp {
             || inner.state.updates.restart_requested()
             || self.config.frames.is_some_and(|limit| self.frames >= limit);
         if finished {
+            // Flush any debounced localStorage writes before the loop stops;
+            // window close and frame limits exit without another frame tick.
+            if let Err(error) = inner.js.call_global("__kapNative_flushStorage", &[]) {
+                log::debug!("storage flush: {error}");
+            }
             if let Some(path) = self.config.screenshot.clone() {
                 self.capture_screenshot(&path);
             }

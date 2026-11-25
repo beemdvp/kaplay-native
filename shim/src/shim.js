@@ -719,6 +719,7 @@
             else this.__parent = null;
             if (quits) {
                 mainCanvas = null;
+                flushStorage();
                 native.env.quit();
             }
         }
@@ -1112,7 +1113,31 @@
             }
         }
 
-        texSubImage2D(target, level, xoffset, yoffset, format, type, source) {
+        texSubImage2D(target, level, xoffset, yoffset, ...rest) {
+            // Two overloads:
+            //   (target, level, x, y, format, type, source)
+            //   (target, level, x, y, width, height, format, type, pixels)
+            if (rest.length >= 5) {
+                const width = rest[0];
+                const height = rest[1];
+                const format = rest[2];
+                const type = rest[3];
+                const pixels = rest[4];
+                native.gl.texSubImage2D(
+                    target,
+                    xoffset,
+                    yoffset,
+                    width,
+                    height,
+                    format,
+                    type,
+                    pixels == null ? new Uint8Array(0) : bytesView(pixels),
+                );
+                return;
+            }
+            const format = rest[0];
+            const type = rest[1];
+            const source = rest[2];
             if (source instanceof HTMLCanvasElement) {
                 native.gl.texSubImage2DCanvas(
                     target,
@@ -1137,9 +1162,26 @@
                     xoffset,
                     yoffset,
                     source.width,
+                    source.height,
                     format,
                     type,
                     bytesView(source.data),
+                );
+            } else if (source instanceof HTMLVideoElement) {
+                native.gl.texImage2DVideo(
+                    target,
+                    format,
+                    format,
+                    type,
+                    source.__nativeId,
+                    source.currentTime,
+                );
+            } else if (ArrayBuffer.isView(source) || source instanceof ArrayBuffer) {
+                // No dimensions in this overload; the caller must use the
+                // width/height form for raw arrays. Keep browser behavior of
+                // rejecting rather than silently guessing.
+                throw new TypeError(
+                    "texSubImage2D with a buffer source requires the width/height overload",
                 );
             }
         }
@@ -1507,6 +1549,23 @@
                 }, 0);
             };
             const apply = (bytes) => {
+                // Decode off the frame thread when the host supports it; a
+                // large PNG must not hitch the frame. The synchronous path
+                // remains for hosts without the async bridge.
+                if (native.image && typeof native.image.decodeAsync === "function") {
+                    let request = 0;
+                    try {
+                        request = native.image.decodeAsync(bytes);
+                    } catch (error) {
+                        reportError(error);
+                    }
+                    if (request > 0) {
+                        pendingImageDecodes.set(request, { accept, fail, request: this.__load });
+                        return;
+                    }
+                    fail();
+                    return;
+                }
                 let id = -1;
                 try {
                     id = native.image.decode(bytes);
@@ -1530,14 +1589,29 @@
                 else fail();
                 return;
             }
-            try {
-                const id = native.image.load(url);
-                if (id >= 0) {
-                    accept(id);
+            if (native.image && typeof native.image.loadAsync === "function") {
+                let request = 0;
+                try {
+                    request = native.image.loadAsync(url);
+                } catch (error) {
+                    reportError(error);
+                }
+                if (request > 0) {
+                    pendingImageDecodes.set(request, { accept, fail, request: this.__load });
                     return;
                 }
-            } catch (error) {
-                reportError(error);
+                // A zero request means the asset was not found; fall through
+                // to the network path exactly like the synchronous loader.
+            } else {
+                try {
+                    const id = native.image.load(url);
+                    if (id >= 0) {
+                        accept(id);
+                        return;
+                    }
+                } catch (error) {
+                    reportError(error);
+                }
             }
             if (!native.env.networkAllowed) {
                 fail();
@@ -1549,6 +1623,23 @@
                 .catch(fail);
         }
     }
+
+    const pendingImageDecodes = new Map();
+
+    global.__kapNative_onImageDecoded = function (request, id, ok) {
+        const pending = pendingImageDecodes.get(request);
+        if (!pending) {
+            // The Image moved on to another src while decoding; release the
+            // orphaned bitmap instead of leaking it.
+            if (ok && id > 0 && native.image && typeof native.image.free === "function") {
+                native.image.free(id);
+            }
+            return;
+        }
+        pendingImageDecodes.delete(request);
+        if (ok && id > 0) pending.accept(id);
+        else pending.fail();
+    };
 
     // Exposed for `instanceof` feature checks only; `createImageBitmap` is not
     // implemented, so this class is never produced by the runtime.
@@ -1611,14 +1702,36 @@
 
     function randomBytes(length) {
         const bytes = new Uint8Array(length);
-        for (let i = 0; i < length; i++) bytes[i] = Math.floor(Math.random() * 256);
+        fillRandom(bytes);
         return bytes;
+    }
+
+    // Security-sensitive randomness (PKCE verifiers, nonces, UUIDs) comes from
+    // the host CSPRNG. Math.random stays available for gameplay but must not
+    // back crypto.getRandomValues.
+    function fillRandom(bytes) {
+        if (native.env && typeof native.env.randomBytes === "function") {
+            native.env.randomBytes(bytes);
+            return;
+        }
+        for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
     }
 
     const crypto = {
         getRandomValues(view) {
-            const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
-            for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+            if (!(view instanceof Uint8Array)
+                && !(view instanceof Int8Array)
+                && !(view instanceof Uint16Array)
+                && !(view instanceof Int16Array)
+                && !(view instanceof Uint32Array)
+                && !(view instanceof Int32Array)
+                && !(view instanceof Uint8ClampedArray)) {
+                throw new TypeError("getRandomValues requires an integer typed array");
+            }
+            if (view.byteLength > 65536) {
+                throw new Error("getRandomValues: quota exceeded (65536 bytes)");
+            }
+            fillRandom(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
             return view;
         },
         randomUUID() {
@@ -4326,6 +4439,7 @@
             }
         }
         audioTick();
+        flushStorage();
         inFrame = false;
     };
 
@@ -4992,7 +5106,18 @@
         }
     })();
 
+    // Writes are coalesced: a game that sets items every frame (settings
+    // sliders, incremental progress) must not serialize and fsync the whole
+    // store per call. Dirty state flushes once per frame and on quit.
+    let storageDirty = false;
+
     function persistStorage() {
+        storageDirty = true;
+    }
+
+    function flushStorage() {
+        if (!storageDirty) return;
+        storageDirty = false;
         try {
             native.storage.save(JSON.stringify(storageData));
         } catch (error) {
@@ -5036,6 +5161,10 @@
             return true;
         },
     });
+
+    // The host calls this once before exiting so debounced writes survive
+    // window close and --frames limits, which stop without another frame.
+    global.__kapNative_flushStorage = flushStorage;
 
     const gamepadObjects = new Map();
     let gamepadRevision = -1;
@@ -5896,7 +6025,10 @@
     define("TextEncoder", TextEncoder);
     define("TextDecoder", TextDecoder);
     global.fetch = fetchResource;
-    global.close = () => native.env.quit();
+    global.close = () => {
+        flushStorage();
+        native.env.quit();
+    };
     global.atob = atob;
     global.btoa = btoa;
     global.requestAnimationFrame = requestAnimationFrame;

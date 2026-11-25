@@ -23,6 +23,88 @@ pub struct ImageData {
     pub pixels: Vec<u8>,
 }
 
+/// Result of a background image decode, drained by the frame loop.
+pub struct ImageDecoded {
+    pub request: u32,
+    pub image: Option<ImageData>,
+}
+
+/// Decodes images off the frame thread. Mirrors the audio decode pool: a
+/// bounded worker set consumes jobs and reports results through a shared queue
+/// the frame loop drains, so a large PNG no longer hitches the frame.
+pub struct ImageDecoder {
+    sender: std::sync::mpsc::Sender<(u32, Arc<[u8]>)>,
+    results: Arc<std::sync::Mutex<Vec<ImageDecoded>>>,
+}
+
+impl ImageDecoder {
+    pub fn new() -> Self {
+        let (sender, receiver) = std::sync::mpsc::channel::<(u32, Arc<[u8]>)>();
+        let receiver = Arc::new(std::sync::Mutex::new(receiver));
+        let results = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let workers = std::thread::available_parallelism()
+            .map(|parallelism| parallelism.get().div_ceil(2))
+            .unwrap_or(2)
+            .clamp(1, 4);
+        for index in 0..workers {
+            let receiver = Arc::clone(&receiver);
+            let results = Arc::clone(&results);
+            let spawned = std::thread::Builder::new()
+                .name(format!("kaplay-image-decode-{index}"))
+                .spawn(move || loop {
+                    let job = match receiver.lock() {
+                        Ok(queue) => queue.recv(),
+                        Err(_) => return,
+                    };
+                    let Ok((request, bytes)) = job else {
+                        return;
+                    };
+                    let image = decode_image_bytes(&bytes);
+                    if let Ok(mut results) = results.lock() {
+                        results.push(ImageDecoded { request, image });
+                    }
+                });
+            if let Err(error) = spawned {
+                log::error!("failed to start the image decode worker: {error}");
+            }
+        }
+        Self { sender, results }
+    }
+
+    pub fn decode_async(&self, request: u32, bytes: Arc<[u8]>) {
+        if self.sender.send((request, bytes)).is_err() {
+            log::warn!("image decode worker unavailable; request {request} dropped");
+        }
+    }
+
+    pub fn take_results(&self) -> Vec<ImageDecoded> {
+        self.results
+            .lock()
+            .map(|mut results| std::mem::take(&mut *results))
+            .unwrap_or_default()
+    }
+}
+
+/// Decode with resource limits so a corrupt or hostile asset cannot allocate
+/// unbounded memory (relevant when games fetch remote images).
+fn decode_image_bytes(bytes: &[u8]) -> Option<ImageData> {
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16_384);
+    limits.max_image_height = Some(16_384);
+    limits.max_alloc = Some(512 * 1024 * 1024);
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    reader.limits(limits);
+    let image = reader.decode().ok()?;
+    let rgba = image.into_rgba8();
+    Some(ImageData {
+        width: rgba.width(),
+        height: rgba.height(),
+        pixels: rgba.into_raw(),
+    })
+}
+
 pub struct PendingMessage {
     pub socket: u32,
     pub data: Vec<u8>,
@@ -65,6 +147,8 @@ pub struct HostState {
     pub gamepads: RefCell<Gamepads>,
     pub screenshot: RefCell<Option<Vec<u8>>>,
     pub canvas_png: RefCell<Option<(u32, Vec<u8>)>>,
+    pub image_decoder: ImageDecoder,
+    pub next_image_request: Cell<u32>,
 }
 
 impl HostState {
@@ -244,9 +328,22 @@ impl HostState {
     }
 
     pub fn decode_image(&self, bytes: &[u8]) -> Option<u32> {
-        let image = image::load_from_memory(bytes).ok()?;
-        let rgba = image.into_rgba8();
-        Some(self.store_image(rgba.width(), rgba.height(), rgba.into_raw()))
+        let image = decode_image_bytes(bytes)?;
+        Some(self.store_image(image.width, image.height, image.pixels))
+    }
+
+    /// Queue a background decode; the frame loop delivers the result through
+    /// `__kapNative_onImageDecoded`. Returns the request id.
+    pub fn decode_image_async(&self, bytes: Arc<[u8]>) -> u32 {
+        let request = self.next_image_request.get();
+        self.next_image_request.set(request.wrapping_add(1));
+        self.image_decoder.decode_async(request, bytes);
+        request
+    }
+
+    /// Adopt a finished background decode into the image registry.
+    pub fn adopt_decoded_image(&self, image: ImageData) -> u32 {
+        self.store_image(image.width, image.height, image.pixels)
     }
 
     pub fn load_storage(&self) -> String {

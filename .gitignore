@@ -7,3 +7,4 @@ build/
 steam_appid.txt
 .DS_Store
 benchmarks/results/
+.devlibs/

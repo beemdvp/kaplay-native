@@ -130,15 +130,18 @@ each callback recovers it from the callback info; the QuickJS path captures an
 
 ## Watchdog
 
-`KAPLAY_NATIVE_WATCHDOG=1` interrupts JavaScript that stalls a boot phase or
-frame for more than four seconds. The mechanism differs per engine:
+`KAPLAY_NATIVE_WATCHDOG=1` interrupts JavaScript that stalls a boot phase
+(`preload`, `boot`) or frame (`frame update`, `drain`) for more than four
+seconds. The mechanism differs per engine:
 
 - QuickJS installs an interrupt handler through `Runtime::set_interrupt_handler`.
 - V8 spawns a watchdog thread holding an `IsolateHandle`; it polls a shared
   deadline and calls `terminate_execution()`, which resolves to an uncatchable
   termination exception on the main thread.
 
-Both report the stalled phase and leave the host running.
+Both report the stalled phase and leave the host running. Independently of
+the watchdog, V8 microtask drains are always bounded by a four-second
+deadline guard so a self-requeueing microtask cannot hang the frame.
 
 ## Parity checks
 

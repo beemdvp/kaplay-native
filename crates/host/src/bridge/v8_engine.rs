@@ -231,11 +231,21 @@ fn install_env(
     register(scope, object, "now", env_now, data);
     register(scope, object, "log", env_log, data);
     register(scope, object, "quit", env_quit, data);
+    register(scope, object, "randomBytes", env_random_bytes, data);
     set_property(scope, native, "env", object.into());
 }
 
 fn env_now<'s, 'i>(_scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
     rv.set_double(host(&args).now_ms());
+}
+
+fn env_random_bytes<'s, 'i>(_scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv: Rv<'s>) {
+    use ring::rand::SecureRandom;
+    let rng = ring::rand::SystemRandom::new();
+    with_u8_mut(args.get(0), |out| {
+        // The shim caps requests at the Web Crypto quota (64 KiB).
+        let _ = rng.fill(out);
+    });
 }
 
 fn env_log<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv: Rv<'s>) {
@@ -390,10 +400,32 @@ fn install_image(scope: &PinScope<'_, '_>, native: Local<v8::Object>, data: Loca
     let object = v8::Object::new(scope);
     register(scope, object, "load", image_load, data);
     register(scope, object, "decode", image_decode, data);
+    register(scope, object, "decodeAsync", image_decode_async, data);
+    register(scope, object, "loadAsync", image_load_async, data);
     register(scope, object, "width", image_width, data);
     register(scope, object, "height", image_height, data);
     register(scope, object, "free", image_free, data);
     set_property(scope, native, "image", object.into());
+}
+
+fn image_decode_async<'s, 'i>(_scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
+    let state = host(&args);
+    let request = with_u8(args.get(0), |bytes| {
+        state.decode_image_async(Arc::from(bytes))
+    })
+    .unwrap_or(0);
+    rv.set_uint32(request);
+}
+
+fn image_load_async<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
+    let state = host(&args);
+    let url = string_arg(scope, &args, 0);
+    let request = state
+        .assets
+        .read_uncached(&url)
+        .map(|bytes| state.decode_image_async(bytes))
+        .unwrap_or(0);
+    rv.set_uint32(request);
 }
 
 fn image_load<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut rv: Rv<'s>) {
@@ -1770,20 +1802,39 @@ fn gl_tex_image_2d<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv: Rv
     let height = gl_arg_i32(scope, &args, 3);
     let format = gl_arg_u32(scope, &args, 4);
     let ty = gl_arg_u32(scope, &args, 5);
-    let owned = with_u8(args.get(6), <[u8]>::to_vec);
     let options = state.gl.borrow().upload_options();
-    state.gl.borrow_mut().tex_image_2d(
-        target,
-        0,
-        internal_format,
-        width,
-        height,
-        0,
-        format,
-        ty,
-        owned.as_deref(),
-        options,
-    );
+    let pixels = args.get(6);
+    if pixels.is_null_or_undefined() {
+        state.gl.borrow_mut().tex_image_2d(
+            target,
+            0,
+            internal_format,
+            width,
+            height,
+            0,
+            format,
+            ty,
+            None,
+            options,
+        );
+        return;
+    }
+    // Borrow the caller's backing store directly; `with_u8` pins it for the
+    // duration of the upload so no pixel copy is needed.
+    with_u8(pixels, |bytes| {
+        state.gl.borrow_mut().tex_image_2d(
+            target,
+            0,
+            internal_format,
+            width,
+            height,
+            0,
+            format,
+            ty,
+            Some(bytes),
+            options,
+        );
+    });
 }
 
 fn gl_tex_sub_image_2d<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv: Rv<'s>) {
@@ -1792,21 +1843,18 @@ fn gl_tex_sub_image_2d<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv
     let x = gl_arg_i32(scope, &args, 1);
     let y = gl_arg_i32(scope, &args, 2);
     let width = gl_arg_i32(scope, &args, 3);
-    let format = gl_arg_u32(scope, &args, 4);
-    let ty = gl_arg_u32(scope, &args, 5);
-    let Some(bytes) = with_u8(args.get(6), <[u8]>::to_vec) else {
-        return;
-    };
-    let height = if width > 0 {
-        (bytes.len() as i32 / (width * 4)).max(1)
-    } else {
-        0
-    };
+    let height = gl_arg_i32(scope, &args, 4);
+    let format = gl_arg_u32(scope, &args, 5);
+    let ty = gl_arg_u32(scope, &args, 6);
     let options = state.gl.borrow().upload_options();
-    state
-        .gl
-        .borrow_mut()
-        .tex_sub_image_2d(target, 0, x, y, width, height, format, ty, &bytes, options);
+    // Borrow the caller's backing store directly; `with_u8` pins it for the
+    // duration of the upload so no pixel copy is needed.
+    with_u8(args.get(7), |bytes| {
+        state
+            .gl
+            .borrow_mut()
+            .tex_sub_image_2d(target, 0, x, y, width, height, format, ty, bytes, options);
+    });
 }
 
 fn gl_tex_image_2d_image<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, _rv: Rv<'s>) {

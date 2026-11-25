@@ -4,6 +4,16 @@
   bundle passed with `--preload`.
 - `smoke` - raw WebGL without KAPLAY: clears the screen, uploads a textured
   quad, and captures a screenshot. Used as the CI smoke test.
+- `texupload` - focused texture-upload acceptance test: `texImage2D` with raw
+  typed arrays, `texSubImage2D` with the width/height overload, `ImageData`,
+  and offset sub-updates, each rendered to a quadrant and verified with
+  `readPixels`. Runs identically on both engines.
+- `imageload` - async image-decode acceptance test: loads a PNG data URL
+  through `Image.src`, verifies dimensions and decoded pixels via a GL
+  texture readback, and checks that a src switch after load still completes.
+- `storage` - debounced localStorage acceptance test: writes 201 items in one
+  frame; run it twice with the same `--save-dir` to verify the pre-exit flush
+  persisted everything.
 - `modules` - a multi-chunk ES module build: the entry imports a sibling chunk,
   loads another chunk with `import()`, checks that both share one chunk
   instance, and reads the canvas and title from `index.html`. Used as the CI
