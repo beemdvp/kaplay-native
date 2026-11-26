@@ -45,6 +45,26 @@ jobs:
       - run: cargo test -p kaplay-native-host --no-default-features --features v8
       - run: cargo test -p kaplay-native-host --features v8
 
+  steam-sdk:
+    name: Steamworks SDK (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
+            libxi-dev libxcursor-dev libxrandr-dev libgl1-mesa-dev libxkbcommon-x11-0 libudev-dev \
+            xvfb lld
+      - run: cargo build --release -p kaplay-native-host --features v8
+        env:
+          RUSTFLAGS: -C force-unwind-tables=no -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--icf=all
+      - name: Steam API contract against the vendored SDK
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: xvfb-run -a scripts/steam-api-test.sh --bin target/release/kaplay-native-host
+
   node:
     name: Node (${{ matrix.os }})
     strategy:

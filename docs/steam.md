@@ -133,6 +133,30 @@ through the client is the real test; for a direct launch,
 `LD_PRELOAD=$HOME/.local/share/Steam/ubuntu12_64/gameoverlayrenderer.so` gives
 the renderer a chance to attach.
 
+## Continuous integration
+
+The `Steamworks SDK` CI job (Linux only) and `cargo test -p kaplay-native-steam`
+on Linux x86_64 test against the vendored redistributable
+`crates/steam/tests/fixtures/libsteam_api.so`. The fixture is test-only: it is
+never linked into the host or packed into a game, so the "never bundle the
+redistributables" rule for distribution still holds.
+
+`scripts/steam-api-test.sh` runs `scripts/steam-api-test.js` under every engine
+the host binary provides and checks:
+
+- `--no-steam` and a missing library: safe fallbacks, the game keeps rendering
+- the real redistributable: every flat API symbol resolves, `InitFlat` fails
+  soft without a client, and `RestartAppIfNecessary` does not relaunch when a
+  Steam launch context is present
+- the documented JS contract on both engines, including `null` (not
+  `undefined`) from `playerName`, `getStatInt`, `getStatFloat`, and `readCloud`
+
+CI runners have no Steam client, so live stats, achievements, cloud, and the
+overlay stay local/manual tests. The SDK download requires a partner login, so
+CI cannot fetch new releases itself: refresh the fixture when Valve ships a
+new SDK (procedure in `crates/steam/tests/fixtures/README.md`). A Valve-side
+interface version bump fails CI once the fixture is refreshed.
+
 ## Manual validation checklist
 
 Overlay behavior cannot be verified without a Steam client, so it stays a
