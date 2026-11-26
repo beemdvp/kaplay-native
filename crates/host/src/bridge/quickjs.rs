@@ -4,7 +4,7 @@ use std::sync::Arc;
 use kaplay_native_canvas2d::ImageSource;
 use kaplay_native_gfx::pixels::UploadOptions;
 use rquickjs::function::Rest;
-use rquickjs::{Ctx, FromJs, Function, Object, TypedArray};
+use rquickjs::{Ctx, FromJs, Function, IntoJs, Object, TypedArray, Value};
 
 use super::{handle, option_handle, parse_headers, source_size};
 use crate::state::{HostState, VideoInfo};
@@ -1263,6 +1263,21 @@ fn install_gamepad<'js>(
     Ok(())
 }
 
+/// Optional bridge result that maps `None` to `null` (rquickjs maps
+/// `Option::None` to `undefined`, but the documented Steam API contract and
+/// the V8 bridge use `null`). Implementing `IntoJs` avoids capturing a `Ctx`
+/// in the registered closure, which would leak the runtime at shutdown.
+struct Nullable<T>(Option<T>);
+
+impl<'js, T: IntoJs<'js>> IntoJs<'js> for Nullable<T> {
+    fn into_js(self, ctx: &Ctx<'js>) -> rquickjs::Result<Value<'js>> {
+        match self.0 {
+            Some(value) => value.into_js(ctx),
+            None => Ok(Value::new_null(ctx.clone())),
+        }
+    }
+}
+
 fn install_steam<'js>(
     ctx: &Ctx<'js>,
     native: &Object<'js>,
@@ -1286,12 +1301,14 @@ fn install_steam<'js>(
         let state = state.clone();
         object.set(
             "playerName",
-            Function::new(ctx.clone(), move || -> Option<String> {
-                state
-                    .steam
-                    .borrow()
-                    .as_ref()
-                    .and_then(|api| api.player_name())
+            Function::new(ctx.clone(), move || {
+                Nullable(
+                    state
+                        .steam
+                        .borrow()
+                        .as_ref()
+                        .and_then(|api| api.player_name()),
+                )
             })?,
         )?;
     }
@@ -1365,12 +1382,14 @@ fn install_steam<'js>(
         let state = state.clone();
         object.set(
             "getStatInt",
-            Function::new(ctx.clone(), move |name: String| -> Option<i32> {
-                state
-                    .steam
-                    .borrow()
-                    .as_ref()
-                    .and_then(|api| api.get_stat_int(&name))
+            Function::new(ctx.clone(), move |name: String| {
+                Nullable(
+                    state
+                        .steam
+                        .borrow()
+                        .as_ref()
+                        .and_then(|api| api.get_stat_int(&name)),
+                )
             })?,
         )?;
     }
@@ -1391,12 +1410,14 @@ fn install_steam<'js>(
         let state = state.clone();
         object.set(
             "getStatFloat",
-            Function::new(ctx.clone(), move |name: String| -> Option<f32> {
-                state
-                    .steam
-                    .borrow()
-                    .as_ref()
-                    .and_then(|api| api.get_stat_float(&name))
+            Function::new(ctx.clone(), move |name: String| {
+                Nullable(
+                    state
+                        .steam
+                        .borrow()
+                        .as_ref()
+                        .and_then(|api| api.get_stat_float(&name)),
+                )
             })?,
         )?;
     }
@@ -1417,13 +1438,15 @@ fn install_steam<'js>(
         let state = state.clone();
         object.set(
             "readCloud",
-            Function::new(ctx.clone(), move |name: String| -> Option<String> {
-                state
-                    .steam
-                    .borrow()
-                    .as_ref()
-                    .and_then(|api| api.read_file(&name))
-                    .map(|data| String::from_utf8_lossy(&data).into_owned())
+            Function::new(ctx.clone(), move |name: String| {
+                Nullable(
+                    state
+                        .steam
+                        .borrow()
+                        .as_ref()
+                        .and_then(|api| api.read_file(&name))
+                        .map(|data| String::from_utf8_lossy(&data).into_owned()),
+                )
             })?,
         )?;
     }

@@ -111,7 +111,7 @@ fn set_opt_string(scope: &PinScope<'_, '_>, rv: &mut Rv<'_>, value: Option<Strin
     let text = value.and_then(|value| v8::String::new(scope, &value));
     match text {
         Some(text) => rv.set(text.into()),
-        None => rv.set_undefined(),
+        None => rv.set_null(),
     }
 }
 
@@ -1327,7 +1327,7 @@ fn steam_get_stat_int<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mut 
         .and_then(|api| api.get_stat_int(&name))
     {
         Some(value) => rv.set_int32(value),
-        None => rv.set_undefined(),
+        None => rv.set_null(),
     }
 }
 
@@ -1354,7 +1354,7 @@ fn steam_get_stat_float<'s, 'i>(scope: &mut PinScope<'s, 'i>, args: Args<'s>, mu
         .and_then(|api| api.get_stat_float(&name))
     {
         Some(value) => rv.set_double(f64::from(value)),
-        None => rv.set_undefined(),
+        None => rv.set_null(),
     }
 }
 
