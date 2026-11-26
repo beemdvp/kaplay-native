@@ -478,7 +478,10 @@ impl SteamApi {
             if storage.is_null() {
                 return false;
             }
-            (self.file_write)(storage, name.as_ptr(), data.as_ptr(), data.len() as i32)
+            let Ok(size) = i32::try_from(data.len()) else {
+                return false;
+            };
+            (self.file_write)(storage, name.as_ptr(), data.as_ptr(), size)
         }
     }
 
